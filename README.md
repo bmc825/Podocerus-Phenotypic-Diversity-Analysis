@@ -5,7 +5,7 @@
 This repository contains the analytical workflow used to investigate phenotypic diversity in the marine amphipod *Podocerus aff. cristatus*.
 
 <p align="center">
-  <img src="figures/workflow.png" width="75%">
+  <img src="figures/Workflow_Diagram.png" width="75%">
 </p>
 
 The project integrates image-derived phenotypes, phylogenetic analyses, statistical modeling, camouflage assessment, and ecological data to examine how color-pattern variation is distributed within a species and whether phenotypic diversity is best characterized as discrete morphs or continuous multivariate variation.
