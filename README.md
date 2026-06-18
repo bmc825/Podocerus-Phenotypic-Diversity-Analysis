@@ -4,160 +4,74 @@
 
 This repository contains the analytical workflow used to investigate phenotypic diversity in the marine amphipod *Podocerus aff. cristatus*.
 
-The project integrates image analysis, color-pattern quantification, phylogenetic inference, statistical modeling, camouflage assessment, and ecological analyses to evaluate whether phenotypic variation is best characterized as discrete color morphs or continuous multivariate variation. Analyses further examine relationships among phenotype, microhabitat use, camouflage performance, nudibranch resemblance, and genetic structure.
+The project integrates image-derived phenotypes, phylogenetic analyses, statistical modeling, camouflage assessment, and ecological data to examine how color-pattern variation is distributed within a species and whether phenotypic diversity is best characterized as discrete morphs or continuous multivariate variation.
+
+Analyses further evaluate relationships among phenotype, microhabitat use, camouflage performance, nudibranch resemblance, and genetic structure.
 
 ---
 
-## Analytical Components
+## Workflow Summary
 
-### Image Processing & Standardization
+### 1. Image Processing & Phenotype Extraction
 
-* Image calibration and color standardization
-* Geometric landmarking and image unwarping
-* Region-of-interest extraction
-* Automated image preprocessing
+`00_patternize_recolorize.Rmd`
 
-### Color & Pattern Quantification
+* Image standardization and preprocessing
+* Color calibration workflows
+* Pattern extraction and quantification
+* Preparation of image-derived phenotypic datasets
 
-* Color histogram generation
-* Color-pattern clustering
-* Phenotypic distance analyses
-* Multivariate phenotype characterization
+### 2. Phylogenetic Analyses
 
-### Phylogenetic & Genetic Analyses
+`Phylogenetic_analysis.Rmd`
 
 * Sequence alignment and quality control
-* Haplotype network construction
-* Phylogenetic inference
+* Haplotype analyses
+* Phylogenetic reconstruction
 * Species delimitation analyses
 
-### Statistical Modeling
+### 3. Camouflage Analyses
+
+`Model1_chromatic_contrast.Rmd`
+
+* Chromatic contrast analyses
+* Background matching assessments
+
+`Model2_achromatic_contrast.Rmd`
+
+* Achromatic contrast analyses
+* Luminance-based camouflage metrics
+
+`Model3_GabRat.Rmd`
+
+* Outline disruption analyses
+* GabRat edge-disruption metrics
+
+### 4. Ecological & Statistical Models
+
+`Model4_Occurrence.Rmd`
+
+* Microhabitat association analyses
+* Population occurrence models
+* Phenotype-environment relationships
+
+`Model5_chromatic_contrast.Rmd`
+
+* Extended chromatic contrast analyses
+* Evaluation of ecological predictors of camouflage performance
+
+---
+
+## Analytical Approaches
 
 * Principal Components Analysis (PCA)
 * Multivariate statistical analyses
 * Bayesian generalized linear mixed models
 * Model selection and comparison
 * Permutation-based hypothesis testing
-
-### Camouflage Assessment
-
-* Chromatic similarity analyses
-* Achromatic similarity analyses
-* Outline disruption metrics
-* Background matching assessments
-* Visual contrast calculations
-
-### Ecological Analyses
-
-* Microhabitat association analyses
-* Population structure analyses
-* Site-level comparisons
-* Phenotype-environment relationships
-
-### Visualization & Reporting
-
-* Publication-quality figure generation
-* Automated statistical summaries
-* Reproducible manuscript outputs using R Markdown
-
----
-
-## Software & Tools
-
-Primary analyses utilized:
-
-* R
-* R Markdown
-* tidyverse
-* brms
-* colordistance
-* vegan
-* cluster
-* ape
-* pegas
-* ggtree
-* ImageJ
-* Geneious
-* IQ-TREE
-
----
-
-## Computational Environment
-
-The workflow was developed primarily in R and R Markdown.
-
-Key components include:
-
-* Reproducible analytical workflows
-* Statistical modeling
-* Data integration
-* Figure generation
-* Automated reporting
-
----
-
-## Research Applications
-
-This workflow demonstrates approaches for:
-
-* Quantitative phenotype analysis
-* Integration of imaging, ecological, and genetic datasets
-* Bayesian statistical modeling
-* Multivariate biological data analysis
-* Camouflage and visual ecology research
-* Reproducible scientific workflows
-
----
-
-## Repository Structure
-
-```text
-├── data/
-├── scripts/
-├── figures/
-├── outputs/
-├── manuscript/
-└── README.md
-```
-
----
-
-## Associated Research
-
-Cummings, B.C. *Unraveling Amphipod Diversity Across Phylogenetic, Phenotypic, and Community Scales*. PhD Dissertation, University of Florida (2026).
-
-Cummings, B.C. *Continuous Phenotypic Diversity in Podocerus aff. cristatus*. Manuscript in preparation.
-
----
-
-## Author
-
-**Brittany Cummings, PhD**
-
-Evolutionary Genomics Researcher
-
-Research interests: evolutionary genomics, computational biology, phenotypic diversity, visual ecology, camouflage, and biodiversity science.
-
-### Camouflage Assessment
-
-* Visual contrast calculations
-* Chromatic similarity analyses
-* Achromatic similarity analyses
-* Outline disruption metrics
-* Background matching assessments
-
-### Ecological Analyses
-
-* Microhabitat association analyses
-* Population structure analyses
-* Site-level comparisons
-* Phenotype-environment relationships
-
-### Visualization & Reporting
-
-* Publication-quality figure generation
-* Automated statistical summaries
-* Reproducible manuscript outputs using R Markdown
+* Color-pattern clustering
+* Phylogenetic inference
+* Haplotype network analyses
 
 ---
 
@@ -181,40 +95,44 @@ Primary analyses were conducted using:
 
 ---
 
-## Repository Structure
-
-```text
-├── data/
-├── scripts/
-├── figures/
-├── outputs/
-└── README.md
-```
-
----
-
 ## Research Applications
 
 This workflow demonstrates approaches for:
 
-* Reproducible biological data analysis
+* Quantitative phenotype analysis
 * Integration of imaging, ecological, and genetic datasets
-* Statistical modeling of complex biological systems
-* Multivariate phenotype quantification
-* Scientific visualization and reporting
+* Bayesian statistical modeling
+* Multivariate biological data analysis
+* Camouflage and visual ecology research
+* Reproducible scientific workflows
 
 ---
 
-## Citation
+## Repository Structure
 
-If referencing this workflow, please cite:
+```text
+analysis/
+├── 00_patternize_recolorize.Rmd
+├── Phylogenetic_analysis.Rmd
+├── Model1_chromatic_contrast.Rmd
+├── Model2_achromatic_contrast.Rmd
+├── Model3_GabRat.Rmd
+├── Model4_Occurrence.Rmd
+└── Model5_chromatic_contrast.Rmd
+```
+
+---
+
+## Associated Research
 
 Cummings, B.C. *Unraveling Amphipod Diversity Across Phylogenetic, Phenotypic, and Community Scales*. PhD Dissertation, University of Florida (2026).
+
+Cummings, B.C. *Continuous Phenotypic Diversity in Podocerus aff. cristatus*. Manuscript in preparation.
 
 ---
 
 ## Author
 
 **Brittany Cummings, PhD**
+
 Evolutionary Genomics Researcher
-University of Florida
