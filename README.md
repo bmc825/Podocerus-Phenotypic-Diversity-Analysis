@@ -23,7 +23,7 @@ Analyses further evaluate relationships among phenotype, microhabitat use, camou
 * ImageJ and micaToolbox image calibration workflows
 * Reflectance calibration using photographic grey standards
 * Geometric landmarking and consensus-shape image unwarping
-* Pattern extraction and color quantification using Patternize and Recolorize
+* Pattern extraction and color quantification using patternize, recolorize, and micaToolBox
 * Principal component analysis of phenotypic variation
 * Preparation of image-derived phenotypic datasets
 
