@@ -197,12 +197,13 @@ The analyses implemented in this repository rely on the following software and a
 
 * Bürkner PC. 2017. *brms: An R Package for Bayesian Multilevel Models Using Stan*. Journal of Statistical Software 80:1–28.
 * Paradis E, Schliep K. 2019. *ape 5.0: an environment for modern phylogenetics and evolutionary analyses in R*. Bioinformatics 35:526–528.
+* Maechler M et al. *cluster: Cluster Analysis Basics and Extensions*.
 * Nguyen LT, Schmidt HA, von Haeseler A, Minh BQ. 2015. *IQ-TREE: A Fast and Effective Stochastic Algorithm for Estimating Maximum-Likelihood Phylogenies*. Molecular Biology and Evolution 32:268–274.
-* Yu G, Smith DK, Zhu H, Guan Y, Lam TTY. 2017. *ggtree: an R package for visualization and annotation of phylogenetic trees*. Methods in Ecology and Evolution 8:28–36.
+* Oksanen J et al. *vegan: Community Ecology Package*.
+* Troscianko, J., Stevens, M., 2015. *Image calibration and analysis toolbox - a free software suite for objectively measuring reflectance, colour and pattern. Methods in Ecology and Evolution* 6, 1320–1331.
 * Van Belleghem, S.M., Papa, R., Ortiz-Zuazaga, H., Hendrickx, F., Jiggins, C.D., Owen McMillan, W., Counterman, B.A., 2018. *patternize: An R package for quantifying colour pattern variation.* Methods in Ecology and Evolution 9, 390–398.
 * Weller HI, Westneat MW. 2019. *Quantitative color profiling of digital images with earth mover's distance using the R package colordistance*. PeerJ 7:e6398.
-* Oksanen J et al. *vegan: Community Ecology Package*.
-* Maechler M et al. *cluster: Cluster Analysis Basics and Extensions*.
+* Yu G, Smith DK, Zhu H, Guan Y, Lam TTY. 2017. *ggtree: an R package for visualization and annotation of phylogenetic trees*. Methods in Ecology and Evolution 8:28–36.
 
 ---
 
