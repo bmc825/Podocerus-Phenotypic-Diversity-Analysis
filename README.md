@@ -115,14 +115,18 @@ This workflow demonstrates approaches for:
 ## Repository Structure
 
 ```text
-analysis/
-├── 00_patternize_recolorize.Rmd
-├── Phylogenetic_analysis.Rmd
-├── Model1_chromatic_contrast.Rmd
-├── Model2_achromatic_contrast.Rmd
-├── Model3_GabRat.Rmd
-├── Model4_Occurrence.Rmd
-└── Model5_chromatic_contrast.Rmd
+├── README.md
+├── LICENSE
+├── workflow.png
+│
+└── analysis/
+    ├── 00_patternize_recolorize.Rmd
+    ├── Phylogenetic_analysis.Rmd
+    ├── Model1_chromatic_contrast.Rmd
+    ├── Model2_achromatic_contrast.Rmd
+    ├── Model3_GabRat.Rmd
+    ├── Model4_Occurrence.Rmd
+    └── Model5_chromatic_contrast.Rmd
 ```
 
 ---
