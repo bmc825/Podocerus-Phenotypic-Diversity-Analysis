@@ -127,6 +127,16 @@ analysis/
 
 ---
 
+## Example Outputs
+![PCA](figures/phenotype_pca.png)
+![PCA](figures/phenotype_pca.png)
+![PCA](figures/phenotype_pca.png)
+![PCA](figures/phenotype_pca.png)
+![PCA](figures/phenotype_pca.png)
+![PCA](figures/phenotype_pca.png)
+
+---
+
 ## Associated Research
 
 Cummings, B.C. *Unraveling Amphipod Diversity Across Phylogenetic, Phenotypic, and Community Scales*. PhD Dissertation, University of Florida (2026).
