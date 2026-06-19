@@ -115,20 +115,18 @@ This workflow demonstrates approaches for:
 ## Repository Structure
 
 ```text
-
-```text
 ├── README.md
 ├── LICENSE
 ├── workflow.png
 │
 └── analysis/
-    ├── 00_patternize_recolorize.Rmd
-    ├── Phylogenetic_analysis.Rmd
-    ├── Model1_chromatic_contrast.Rmd
-    ├── Model2_achromatic_contrast.Rmd
-    ├── Model3_GabRat.Rmd
-    ├── Model4_Occurrence.Rmd
-    └── Model5_chromatic_contrast.Rmd
+    ├── 01_pattern_extraction.Rmd
+    ├── 02_phylogenetic_structure.Rmd
+    ├── 03_chromatic_background_matching.Rmd
+    ├── 04_achromatic_background_matching.Rmd
+    ├── 05_outline_disruption.Rmd
+    ├── 06_occurrence_models.Rmd
+    └── 07_nudibranch_similarity.Rmd
 ```
 
 ---
