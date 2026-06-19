@@ -141,6 +141,8 @@ analysis/
   <img src="figures/03_plot.png" width="75%">
   <img src="figures/04_plot.png" width="75%">
   <img src="figures/05_plot.png" width="75%">
+</p>
+<p align="center">
   <img src="figures/06_plot.png" width="40%"/>
   <img src="figures/07_plot.png" width="40%">
 </p>
