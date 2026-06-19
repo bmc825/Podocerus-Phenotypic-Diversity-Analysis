@@ -1,0 +1,604 @@
+---
+title: "Analysis of Podocerus aff. cristatus Occurrence in Subtidal Habitat"
+output: html_document
+date: "2026-03-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+
+set.seed(5678)
+```
+
+```{r}
+# Source the package setup script
+source("project_directory/Podocerus/R_files/scripts/00_setup_packages.R")
+
+# Source the custom graphing functions
+source("project_directory/Podocerus/R_files/scripts/01_graphing_functions.R")
+
+```
+
+
+#-------------- DATA PREPARATION -----------------
+
+# Set paths
+```{r}
+base_dir <- "project_directory/Podocerus"
+
+data_dir <- file.path(base_dir,
+  "data/photos/OCCURRENCE_Model4/")
+
+pca_rds_path <- file.path(base_dir,
+  "data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+
+```
+
+# Load visual metric files
+```{r}
+data_m1_pre <- read.csv("project_directory/Podocerus/data/photos/COLORDISTANCE_Model1/data_m1_final.csv")
+
+data_m2_pre <- read.csv("project_directory/Podocerus/data/photos/GRANULARITY_Model2/data_m2_final.csv")
+
+data_m3_pre <- read.csv("project_directory/Podocerus/data/photos/GABRAT_Model3/data_m3_final.csv")
+
+```
+
+# Standardize datasets
+```{r}
+data_m3_pre2 <- data_m3_pre %>%
+  rename(
+    Amphipod_Image = amphipod_image,
+    Substrate_type = background_type
+  )
+
+data_m3_pre2$Substrate_type <- gsub(" ", "_", data_m3_pre2$Substrate_type)
+
+data_m1 <- data_m1_pre %>%
+  mutate(
+    Amphipod_Image = as.character(Amphipod_Image),
+    Substrate_type = as.character(Substrate_type)
+  )
+
+data_m2 <- data_m2_pre %>%
+  mutate(
+    Amphipod_Image = as.character(Amphipod_Image),
+    Substrate_type = as.character(Substrate_type)
+  )
+
+data_m3 <- data_m3_pre2 %>%
+  mutate(
+    Amphipod_Image = as.character(Amphipod_Image),
+    Substrate_type = as.character(Substrate_type)
+  )
+```
+
+
+# Filter dataset to only those used in GabRat
+```{r}
+gabrat_ids <- unique(data_m3$Amphipod_Image)
+
+data_m1 <- data_m1 %>%
+  filter(Amphipod_Image %in% gabrat_ids)
+
+data_m2 <- data_m2 %>%
+  filter(Amphipod_Image %in% gabrat_ids)
+
+
+```
+
+# Collapse EMD
+```{r}
+m1_collapsed <- data_m1 %>%
+  group_by(
+    Amphipod_Image,
+    Substrate_type
+  ) %>%
+  summarise(
+    EMD_mean = mean(EMD, na.rm = TRUE),
+    Is_native_match = first(Is_native_match),
+    .groups = "drop"
+  )
+```
+
+# Collapse emax
+```{r}
+m2_collapsed <- data_m2 %>%
+  group_by(
+    Amphipod_Image,
+    Substrate_type
+  ) %>%
+  summarise(
+    emax_mean = mean(diff_maxpower, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+# Collapse gabrat
+```{r}
+m3_collapsed <- data_m3 %>%
+  group_by(
+    Amphipod_Image,
+    Substrate_type
+  ) %>%
+  summarise(
+    gabrat_mean = mean(gabrat_RG, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+
+# Merge datasets
+```{r}
+occ_data <- m1_collapsed %>%
+  
+  left_join(
+    m2_collapsed,
+    by = c("Amphipod_Image","Substrate_type")
+  ) %>%
+  
+  left_join(
+    m3_collapsed,
+    by = c("Amphipod_Image","Substrate_type")
+  )
+```
+
+# Final formatting
+```{r}
+occ_data_clean <- occ_data %>%
+  mutate(
+    Amphipod_Image = factor(Amphipod_Image),
+    Substrate_type = factor(Substrate_type),
+    Is_native_match = as.integer(Is_native_match)
+  )
+```
+
+# Sanity checks
+```{r}
+nrow(occ_data_clean)
+
+table(occ_data_clean$Substrate_type)
+
+sum(is.na(occ_data_clean))
+```
+
+# Standardize predictors
+```{r}
+data_m4_final <- occ_data_clean %>%
+  mutate(
+    EMD_z = scale(EMD_mean)[,1],
+    emax_z = scale(emax_mean)[,1],
+    gabrat_z = scale(gabrat_mean)[,1]
+  )
+
+```
+
+
+# Look at data
+```{r}
+summary(data_m4_final$Is_native_match)
+hist(data_m4_final$Is_native_match, breaks = 40)
+```
+
+# Save output
+```{r}
+write_csv(
+  data_m4_final,
+  file = "project_directory/Podocerus/data/photos/OCCURRENCE_Model4/data_m4_final.csv"
+)
+```
+
+# Choose model and priors
+We use Generalized Linear Mixed Models (GLMMs) because the response variable (Is_native_match) is binary, indicating whether a given substrate type represents the native microhabitat for a particular amphipod. Binary data violate the assumptions of linear regression, which assumes normally distributed errors and a continuous response variable.
+
+We use Bayesian methods to account for repeated comparisons among amphipods, allowing variation among individuals to be modeled explicitly.
+
+The Bernoulli distribution is appropriate for binary outcomes representing the presence or absence of an event. A logit link function is used to transform the probability of occurrence onto the real number line.
+
+The Bernoulli model is parameterized as:
+
+$$
+yi​∼Bernoulli(pi​)
+$$
+
+The probability $p_i$ (on the logit scale) is modeled as:
+
+$$
+logit(pi​)=α+βxi​
+$$
+
+Where:
+
+-   **$y_{i}$**: Binary response variable for observation $i$ indicating whether the substrate represents the native microhabitat (1 = native substrate, 0 = non-native substrate)
+
+-   **$p_{i}$**: Probability that the substrate is the native substrate for observation $i$
+
+-   **$\alpha$**: Intercept, mean value of $\text{logit}(p)$ when predictors are at baseline
+
+-   **$beta$**: Slope describing the effect of predictor $x_i$
+
+Predictors in this model include standardized measures of chromatic similarity (EMD_z), luminance similarity (emax_z), and outline disruption (gabrat_z).
+
+---
+
+**Intercept ($\alpha$)**: The intercept represents the expected probability that a substrate type is the native substrate when all predictors are at their baseline values (i.e., when standardized predictors equal 0). Because the model uses a logit link, the intercept is defined on the logit scale.
+
+We specify a weakly informative prior centered at zero:
+
+$$
+\alpha \sim N(0, 1)
+$$
+
+Centering the intercept at zero corresponds to a baseline expected probability of:
+
+$$
+logit^{−1}(0)=0.5
+$$
+
+on the original scale. This represents a neutral prior expectation that any substrate type could plausibly represent the native substrate when predictors are at their mean values.
+
+With a standard deviation of 1, approximately 95% of prior mass lies within:
+
+$$
+0 \pm 2
+$$
+
+on the logit scale. On the probability scale this corresponds to:
+
+$$
+logit^{−1}(−2)≈0.12\text{  to  } logit^{−1}(2)≈0.88
+$$
+
+This range allows substantial flexibility in baseline probabilities while discouraging implausibly extreme values. Because the prior is weakly informative relative to the observed data, posterior estimates are primarily determined by the likelihood rather than the prior specification.
+
+---
+
+**Slope ($\beta$)**: The slope represents the change in log-odds that a substrate represents the native substrate associated with a one-unit change in the predictor.
+
+We specify weakly informative priors:
+
+$$
+\beta \sim N(0, 0.5)
+$$
+
+Here, 0.5 represents the standard deviation of the prior. Approximately 95% of values fall within:
+
+$$
+−1.0 \text{ to } 1.0 \text{ on the logit scale}
+$$
+
+On the probability scale this allows predictors to shift expected probabilities across a substantial portion of the 0–1 range while discouraging implausibly large effects.
+
+
+
+---
+
+**Random effects ($\sigma$)**: Random intercepts capture variation among experimental units that is not explained by the fixed effects.
+
+In this model, amphipod individuals are allowed to have their own baseline probability of occurring on a given substrate type. This accounts for repeated comparisons involving the same amphipods and prevents individual-specific differences from inflating fixed-effect estimates.
+
+These deviations are modeled as random variability around the population mean and summarized by their standard deviation ($\sigma$).
+
+
+---
+
+```{r}
+data_m4_final <- read.csv("project_directory/Podocerus/data/photos/OCCURRENCE_Model4/data_m4_final.csv")
+```
+
+# Build model
+Do contrast metrics increase probability of occurrence?
+```{r}
+library(brms)
+
+priors <- c(
+  prior(normal(0,0.5), class="b"),
+  prior(normal(0,1), class="Intercept")
+)
+
+m4_full <- brm(
+  Is_native_match ~ EMD_z + emax_z + gabrat_z + (1 | Amphipod_Image),
+  data = data_m4_final,
+  family = bernoulli(link="logit"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m4_full,
+  file = "project_directory/Podocerus/data/models/m4_full.rds"
+)
+
+```
+
+
+# Check model performance
+Convergence: Check for Rhat ≈ 1.00 and Bulk ESS > 1000
+```{r}
+summary(m4_full)
+```
+
+Posterior predictive check
+```{r}
+pp_check(m4_full, type = "dens_overlay")
+```
+
+# Compare to reduced models
+```{r}
+
+# No predictors other than random effects
+priors <- c(
+  prior(normal(0,1), class="Intercept")
+)
+
+m4_null <- brm(
+  Is_native_match ~ (1 | Amphipod_Image),
+  data = data_m4_final,
+  family = bernoulli(link="logit"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m4_null,
+  file = "project_directory/Podocerus/data/models/m4_null.rds"
+)
+```
+
+```{r}
+m4_full <- add_criterion(m4_full, "loo")
+m4_null <- add_criterion(m4_null, "loo")
+
+# Save models with loo so you don't have to do this again
+saveRDS(
+  m4_full,
+  file = "project_directory/Podocerus/data/models/m4_full.rds"
+)
+saveRDS(
+  m4_null,
+  file = "project_directory/Podocerus/data/models/m4_null.rds"
+)
+```
+
+
+```{r}
+m4_full <- readRDS("project_directory/Podocerus/data/models/m4_full.rds")
+
+m4_null <- readRDS("project_directory/Podocerus/data/models/m4_null.rds")
+
+
+loo_m4 <- loo_compare(m4_full, m4_null)
+
+loo_m4
+
+#Save LOO as a table
+df_loo_m4 <- as.data.frame(loo_m4) %>%
+  rownames_to_column(var = "Model")
+
+# Save loo as tables
+write.table(
+  df_loo_m4,
+  "project_directory/Podocerus/data/tables/table_loo_m4.csv",
+  sep = ",",
+  row.names = TRUE,
+  col.names = TRUE
+)
+```
+
+# Visualize
+```{r}
+library(tidybayes)
+library(dplyr)
+library(ggplot2)
+library(ggdist)
+
+# Extract posterior draws
+m4_post <- spread_draws(
+  m4_full,
+  b_EMD_z,
+  b_emax_z,
+  b_gabrat_z
+) %>%
+  pivot_longer(
+    cols = starts_with("b_"),
+    names_to = "Predictor",
+    values_to = "Estimate"
+  )
+
+# Clean names
+m4_post$Predictor <- recode(
+  m4_post$Predictor,
+  b_EMD_z = "EMD",
+  b_emax_z = "Δemax",
+  b_gabrat_z = "GabRat"
+)
+
+# Reverse order for nicer layout
+m4_post$Predictor <- factor(
+  m4_post$Predictor,
+  levels = rev(c(
+    "EMD",
+    "Δemax",
+    "GabRat"
+  ))
+)
+
+# Plot
+m4_coef_plot <- ggplot(
+  m4_post,
+  aes(
+    x = Estimate,
+    y = Predictor
+  )
+) +
+
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey40",
+    linewidth = 0.8
+  ) +
+
+  stat_pointinterval(
+    .width = c(0.95),
+    point_size = 3.5,
+    linewidth = 5
+  ) +
+
+  coord_cartesian(xlim = c(-0.8, 0.8)) +
+
+  scale_y_discrete(
+    labels = c(
+      "EMD" = "EMD",
+      "Δemax" = expression(Delta * e[max]),
+      "GabRat" = "GabRat"
+    )
+  ) +
+
+  labs(
+    x = "Effect on log-odds of occurrence",
+    y = NULL
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    axis.title = element_text(face = "bold", size = 16),
+    axis.text.y = element_text(size = 18, face = "bold"),
+    axis.text.x = element_text(size = 14),
+    plot.margin = margin(10,20,10,10)
+  )
+
+m4_coef_plot
+
+ggsave(
+  file.path(base_dir, "data/images/m4_coef_plot.png"),
+  m4_coef_plot,
+  width = 5,
+  height = 5,
+  dpi = 600
+)
+```
+
+# Visualize on black
+```{r}
+library(tidybayes)
+library(dplyr)
+library(ggplot2)
+library(ggdist)
+
+# Extract posterior draws
+m4_post <- spread_draws(
+  m4_full,
+  b_EMD_z,
+  b_emax_z,
+  b_gabrat_z
+) %>%
+  pivot_longer(
+    cols = starts_with("b_"),
+    names_to = "Predictor",
+    values_to = "Estimate"
+  )
+
+# Clean names
+m4_post$Predictor <- recode(
+  m4_post$Predictor,
+  b_EMD_z = "EMD",
+  b_emax_z = "Δemax",
+  b_gabrat_z = "GabRat"
+)
+
+# Reverse order for nicer layout
+m4_post$Predictor <- factor(
+  m4_post$Predictor,
+  levels = rev(c(
+    "EMD",
+    "Δemax",
+    "GabRat"
+  ))
+)
+
+# Plot
+m4_coef_plot <- ggplot(
+  m4_post,
+  aes(
+    x = Estimate,
+    y = Predictor
+  )
+) +
+
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "#FAFAFA",
+    linewidth = 0.8
+  ) +
+
+  stat_pointinterval(
+    .width = c(0.95),
+    point_size = 3.5,
+    linewidth = 5,
+    color = "#FAFAFA",
+    stroke = 0.6
+  ) +
+
+  coord_cartesian(xlim = c(-0.8, 0.8)) +
+
+  scale_y_discrete(
+    labels = c(
+      "EMD" = "EMD",
+      "Δemax" = expression(Delta * e[max]),
+      "GabRat" = "GabRat"
+    )
+  ) +
+
+  labs(
+    x = "Effect on log-odds of occurrence",
+    y = NULL
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    # backgrounds
+    plot.background  = element_rect(fill = "black", colour = NA),
+    panel.background = element_rect(fill = "black", colour = NA),
+
+    # remove grids
+    panel.grid = element_blank(),
+
+    # axis styling
+    axis.line = element_line(color = "#FAFAFA", linewidth = 0.8),
+    axis.ticks = element_line(color = "#FAFAFA"),
+
+    # text
+    axis.title = element_text(face = "bold", size = 16, color = "#FAFAFA"),
+    axis.text.y = element_text(size = 18, face = "bold", color = "#FAFAFA"),
+    axis.text.x = element_text(size = 14, color = "#FAFAFA"),
+
+    plot.margin = margin(10,20,10,10)
+  )
+
+m4_coef_plot
+
+ggsave(
+  file.path(base_dir, "data/images/m4_coef_plot_black.png"),
+  m4_coef_plot,
+  width = 5,
+  height = 5,
+  dpi = 600,
+  bg = "black"
+)
+```
+

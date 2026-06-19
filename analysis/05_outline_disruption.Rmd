@@ -1,0 +1,855 @@
+---
+title: "dge Disruption (GabRat) of Podocerus aff. cristatus on backgrounds"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+
+set.seed(5678)
+```
+
+```{r}
+# Source the package setup script
+source("project_directory/Podocerus/R_files/scripts/00_setup_packages.R")
+
+# Source the custom graphing functions
+source("project_directory/Podocerus/R_files/scripts/01_graphing_functions.R")
+
+```
+
+
+#-------------- DATA PREPARATION -----------------
+
+# Set paths
+```{r}
+base_dir <- "project_directory/Podocerus"
+
+data_dir <- file.path(base_dir,
+  "data/photos/GABRAT_Model3/")
+
+pca_rds_path <- file.path(base_dir,
+  "data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+
+```
+
+# Load gabrat files
+```{r}
+# List all csv files
+files <- list.files(data_dir, pattern = "\\.xlsx$", full.names = TRUE)
+
+# Read and combine
+gab_raw <- files %>%
+  map_dfr(read.xlsx)
+
+# Clean column names just in case
+gab_raw <- gab_raw %>% clean_names()
+
+glimpse(gab_raw)
+```
+
+# Create columns for R, G, B channels
+```{r}
+
+gab_wide <- gab_raw %>%
+  group_by(
+    amphipod_image,
+    background_image,
+    background_type,
+    roi,
+    acuity,
+    sigma,
+    sex
+  ) %>%
+  summarise(
+    gabrat_R = mean(gab_rat[channel == "R"], na.rm = TRUE),
+    gabrat_G = mean(gab_rat[channel == "G"], na.rm = TRUE),
+    gabrat_B = mean(gab_rat[channel == "B"], na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+# Average GabRat for R and G channels
+```{r}
+gab_wide_RG <- gab_wide %>%
+  mutate(
+    gabrat_RG = rowMeans(
+      dplyr::select(., gabrat_R, gabrat_G),
+      na.rm = TRUE
+    )
+  )
+```
+
+
+# Compute means across SUB1-SUB5 ROIs
+```{r}
+gab_background_mean <- gab_wide_RG %>%
+  filter(roi != "DORSAL_BODY") %>%
+  group_by(
+    amphipod_image,
+    background_image,
+    background_type,
+    acuity
+  ) %>%
+  summarise(
+    gabrat_RG = mean(gabrat_RG, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+# Filter to Acuity viewpoint0
+```{r}
+# Restrict dataset to acuity 0
+
+gab_background_mean_0 <- gab_background_mean %>%
+  filter(acuity == "0")
+
+```
+
+
+# Determine how many PCs to keep for models 
+```{r}
+pca_obj <- readRDS(pca_rds_path)
+
+# ---- Prepare PCA data ----
+eig_vals <- pca_obj$sdev^2
+var_explained <- eig_vals / sum(eig_vals)
+cum_var <- cumsum(var_explained)
+
+scree_df <- tibble(
+  PC = seq_along(var_explained),
+  Variance = var_explained,
+  Cumulative = cum_var
+)
+
+
+
+# ---- Plot ----
+scree_plot <- ggplot(
+  scree_df %>% filter(PC <= 20),
+  aes(x = PC)
+) +
+  
+  # Bars (variance explained)
+  geom_col(
+    aes(y = Variance),
+    fill = "grey40",
+    width = 0.7
+  ) +
+  
+  # Cumulative line (same axis)
+  geom_line(
+    aes(y = Cumulative),
+    linewidth = 0.9
+  ) +
+  geom_point(
+    aes(y = Cumulative),
+    size = 2
+  ) +
+  
+  # Mark PC3 cutoff
+  geom_vline(
+    xintercept = 3,
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  
+  scale_x_continuous(breaks = 1:20) +
+  scale_y_continuous(
+    limits = c(0, 0.5),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  
+  labs(
+    x = "Principal Component",
+    y = "Proportion of Variance Explained"
+  ) +
+  
+  theme_classic(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    panel.grid = element_blank()
+  )
+
+scree_plot
+
+ggsave(
+  file.path(base_dir, "data/images/PC_scree_plot.png"),
+  scree_plot,
+  width = 7,
+  height = 5,
+  dpi = 600
+)
+
+# We will choose 3 PCs, since that marks the point of diminishing returns in total explained variance
+```
+
+# Merge PCA scores into model data and standardize
+```{r}
+# ------------------------------------------------------------
+# Load PCA scores
+# ------------------------------------------------------------
+
+pc_scores <- pca_obj$x %>%
+  as.data.frame() %>%                 
+  tibble::rownames_to_column("amphipod_image") %>%
+  mutate(
+    amphipod_image = gsub("_unwarped$", "", amphipod_image),
+    amphipod_image = trimws(amphipod_image)
+  ) %>%
+  dplyr::select(amphipod_image, PC1, PC2, PC3)
+
+# ------------------------------------------------------------
+# Merge PCA scores into GabRat dataset
+# ------------------------------------------------------------
+
+data_m3_pca <- gab_background_mean_0 %>%
+  left_join(pc_scores, by = "amphipod_image")
+
+# ------------------------------------------------------------
+# Standardize predictors
+# ------------------------------------------------------------
+
+data_m3_final <- data_m3_pca %>%
+  mutate(
+    PC1_z = as.numeric(scale(PC1)),
+    PC2_z = as.numeric(scale(PC2)),
+    PC3_z = as.numeric(scale(PC3)),
+    
+    amphipod_image = factor(amphipod_image),
+    background_image = factor(background_image),
+    background_type = factor(background_type),
+    acuity = factor(acuity)
+  )
+
+#Sanity check
+nrow(data_m3_final)
+
+length(unique(data_m3_final$amphipod_image))
+length(unique(data_m3_final$background_image))
+length(unique(data_m3_final$background_type))
+```
+
+# Look at data
+```{r}
+summary(data_m3_final$gabrat_RG)
+hist(data_m3_final$gabrat_RG, breaks = 40)
+```
+
+# Save output
+```{r}
+write_csv(
+  data_m3_final,
+  file = "project_directory/Podocerus/data/photos/GABRAT_Model3/data_m3_final.csv"
+)
+```
+
+
+
+
+# Choose model and priors
+We use Generalized Linear Models (GLMs) because the response variable (GabRat) is continuous and bounded between 0 and 1. Such bounded data violate the assumptions of linear regression, which assumes normally distributed errors and an unbounded response variable.
+
+We use Bayesian methods to account for repeated comparisons among amphipods and background images, allowing variation among individuals and images to be modeled explicitly.
+
+The Beta distribution is appropriate for continuous variables bounded between 0 and 1. A logit link function is used to transform the mean of the Beta distribution onto the real number line.
+
+The Beta model is parameterized as:
+
+$$
+yi​∼Beta(μi​,ϕ)
+$$
+
+The mean $\mu_i$ (on the logit scale) is modeled as:
+
+$$
+logit(μi​)=α+βxi​
+$$
+
+Where:
+
+-   **$y_{i}$**: Response variable for observation $i$
+
+-   **$\mu_{i}$**: Mean of the Beta distribution for observation $i$
+
+-   **$\phi$**: Precision parameter controlling dispersion
+
+-   **$\alpha$**: Intercept, mean value of $\logit(\mu)$ when predictors are at baseline
+
+-   **$beta$**: Slope describing the effect of predictor $x_i$
+
+---
+
+**Intercept ($\alpha$)**: The intercept represents the expected value of the response variable when all predictors are at their baseline values (i.e., the reference substrate category and standardized PC scores equal to 0). Because the model uses a logit link, the intercept is defined on the logit scale.
+
+We specify a weakly informative prior centered at zero:
+
+$$
+\alpha \sim N(0, 1)
+$$
+
+Centering the intercept at zero corresponds to a baseline expected value of:
+
+$$
+logit^{−1}(0)=0.5
+$$
+
+on the original scale. This represents a neutral prior expectation that outline disruption could occur anywhere within the possible range.
+
+With a standard deviation of 1, approximately 95% of prior mass lies within:
+
+$$
+0 \pm 2
+$$
+
+on the logit scale. On the original scale this corresponds to:
+
+$$
+logit^{−1}(−2)≈0.12\text{  to  } logit^{−1}(2)≈0.88
+$$
+
+This range spans more than an order of magnitude of possible baseline chromatic distances, allowing substantial flexibility while discouraging implausibly extreme values. Because the prior is weakly informative relative to the observed data, posterior estimates are primarily determined by the likelihood rather than the prior specification.
+
+---
+
+**Slope ($\beta$)**: The slope represents the change in log-odds of the mean GabRat value associated with a one-unit change in the predictor.
+
+We specify weakly informative priors:
+
+$$
+\beta \sim N(0, 0.5)
+$$
+
+Here, 0.5 represents the standard deviation of the prior. Approximately 95% of values fall within:
+
+$$
+−1.0 \text{ to } 1.0 \text{ on the logit scale}
+$$
+
+On the probability scale this allows predictors to shift expected GabRat values across a substantial portion of the 0–1 range while discouraging implausibly large effects.
+
+
+
+---
+
+**Random effects ($\sigma$)**: Random intercepts capture variation among experimental units that is not explained by the fixed effects.
+
+In this model, both amphipod individuals and background images are allowed to have their own baseline levels of outline disruption. This accounts for repeated comparisons involving the same amphipods and the same background images and prevents image-specific or individual-specific differences from inflating fixed-effect estimates.
+
+These deviations are modeled as random variability around the population mean and summarized by their standard deviation ($\sigma$).
+
+
+---
+
+**Precision Parameter ($\phi$):** In a Beta distribution, dispersion is controlled by the precision parameter ($\phi$), which determines how tightly the data are concentrated around the mean. The precision parameter takes positive real values, with larger values indicating greater concentration around the mean—hence higher precision and lower dispersion.
+
+We specify a weakly informative prior:
+
+$$
+\phi \sim \text{Gamma}(2, 0.1)
+$$
+
+This prior allows a wide range of plausible dispersion values while preventing extreme or implausible variability. The data primarily determine the posterior estimate of $\phi$.
+
+---
+
+```{r}
+data_m3_final <- read.csv("project_directory/Podocerus/data/photos/GABRAT_Model3/data_m3_final.csv")
+```
+
+# Build model
+Do phenotypes predict edge disruption?
+```{r}
+
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "phi")
+)
+
+m3_full_int <- brm(
+  gabrat_RG ~ background_type *
+    (PC1_z + PC2_z + PC3_z) +
+    (1 | amphipod_image) +
+    (1 | background_image),
+  data = data_m3_final,
+  family = Beta(link = "logit"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m3_full_int,
+  file = "project_directory/Podocerus/data/models/m3_full_int.rds"
+)
+```
+
+# Check model performance
+Convergence: Check for Rhat ≈ 1.00 and Bulk ESS > 1000
+```{r}
+summary(m3_full_int)
+```
+
+Posterior predictive check
+```{r}
+pp_check(m3_full_int, type = "dens_overlay")
+```
+
+# Compare to reduced models
+```{r}
+# No interaction
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "phi")
+)
+
+m3_full <- brm(
+  gabrat_RG ~ background_type +
+    PC1_z + PC2_z + PC3_z +
+    (1 | amphipod_image) +
+    (1 | background_image),
+  data = data_m3_final,
+  family = Beta(link = "logit"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m3_full,
+  file = "project_directory/Podocerus/data/models/m3_full.rds"
+)
+
+saveRDS(
+  m3_full,
+  file = "project_directory/Podocerus/data/models/m3_full.rds")
+
+# No phenotype predictors
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "phi")
+)
+
+m3_reduced <- brm(
+  gabrat_RG ~ background_type +
+    (1 | amphipod_image) +
+    (1 | background_image),
+  data = data_m3_final,
+  family = Beta(link = "logit"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m3_reduced,
+  file = "project_directory/Podocerus/data/models/m3_reduced.rds"
+)
+
+
+# No predictors other than random effects
+priors <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "phi")
+)
+
+m3_null <- brm(
+  gabrat_RG ~ (1 | amphipod_image) +
+    (1 | background_image),
+  data = data_m3_final,
+  family = Beta(link = "logit"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m3_null,
+  file = "project_directory/Podocerus/data/models/m3_null.rds"
+)
+```
+
+```{r}
+m3_full_int <- add_criterion(m3_full_int, "loo")
+m3_full <- add_criterion(m3_full, "loo")
+m3_reduced <- add_criterion(m3_reduced, "loo")
+m3_null <- add_criterion(m3_null, "loo")
+
+# Save models with loo so you don't have to do this again
+saveRDS(
+  m3_full_int,
+  file = "project_directory/Podocerus/data/models/m3_full_int.rds"
+)
+saveRDS(
+  m3_full,
+  file = "project_directory/Podocerus/data/models/m3_full.rds"
+)
+saveRDS(
+  m3_reduced,
+  file = "project_directory/Podocerus/data/models/m3_reduced.rds"
+)
+saveRDS(
+  m3_null,
+  file = "project_directory/Podocerus/data/models/m3_null.rds"
+)
+```
+
+
+```{r}
+
+m3_full_int <- readRDS("project_directory/Podocerus/data/models/m3_full_int.rds")
+
+m3_full <- readRDS("project_directory/Podocerus/data/models/m3_full.rds")
+
+m3_reduced <- readRDS("project_directory/Podocerus/data/models/m3_reduced.rds")
+
+m3_null <- readRDS("project_directory/Podocerus/data/models/m3_null.rds")
+
+
+loo_m3 <- loo_compare(m3_full_int, m3_full, m3_reduced, m3_null)
+
+loo_m3
+
+#Save LOO as a table
+df_loo_m3 <- as.data.frame(loo_m3) %>%
+  rownames_to_column(var = "Model")
+
+# Save loo as tables
+write.table(
+  df_loo_m3,
+  "project_directory/Podocerus/data/tables/table_loo_m3.csv",
+  sep = ",",
+  row.names = TRUE,
+  col.names = TRUE
+)
+```
+
+# Emmeans to compare substrate
+```{r}
+library(emmeans)
+
+emm_PC1 <- emmeans(m3_full_int, ~ PC1_z | background_type)
+
+contrast(emm_PC1, method = "pairwise")
+
+emm_PC2 <- emmeans(m3_full_int, ~ PC2_z | background_type)
+
+contrast(emm_PC2, method = "pairwise")
+
+emm_PC3 <- emmeans(m3_full_int, ~ PC3_z | background_type)
+
+contrast(emm_PC3, method = "pairwise")
+
+```
+
+# Visualize
+```{r}
+library(tidybayes)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+data_m3_final$background_type <- factor(
+  data_m3_final$background_type,
+  levels = c("Algae","Lafoea","Other hydroid","Sertulariidae")
+)
+
+# Prediction grid
+chrom_grid <- expand.grid(
+  PC_value = seq(-2, 2, length.out = 100),
+  PC_axis = c("PC1_z","PC2_z","PC3_z"),
+  background_type = unique(data_m3_final$background_type)
+)
+
+chrom_grid <- chrom_grid %>%
+  mutate(
+    PC1_z = ifelse(PC_axis == "PC1_z", PC_value, 0),
+    PC2_z = ifelse(PC_axis == "PC2_z", PC_value, 0),
+    PC3_z = ifelse(PC_axis == "PC3_z", PC_value, 0)
+  )
+
+# Posterior predictions
+chrom_pred <- add_epred_draws(
+  m3_full_int,
+  newdata = chrom_grid,
+  re_formula = NA
+)
+
+# Colorblind-safe palette
+substrate_cols <- c(
+  "Algae" = "#E69F00",        # orange (distinct)
+  "Lafoea" = "#08306B",       # dark blue
+  "Other hydroid" = "#2171B5",# medium blue
+  "Sertulariidae" = "#6BAED6" # light blue
+)
+
+# Plot
+m3_plot <- ggplot(
+  chrom_pred,
+  aes(
+    x = PC_value,
+    y = .epred,
+    color = background_type,
+    fill = background_type
+  )
+) +
+
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.3) +
+
+    stat_lineribbon(
+    .width = 0.95,
+    alpha = 0.22,
+    linewidth = 0
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 2
+  ) +
+
+  facet_wrap(
+    ~PC_axis,
+    nrow = 1,
+    labeller = labeller(
+      PC_axis = c(
+        PC1_z = "PC1",
+        PC2_z = "PC2",
+        PC3_z = "PC3"
+      )
+    )
+  ) +
+
+  scale_color_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  scale_fill_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  guides(
+    fill = "none",
+    color = guide_legend(
+      override.aes = list(
+        fill = NA,
+        linewidth = 2
+      )
+    )
+  ) +
+
+  labs(
+    x = "Phenotype axis (SD units)",
+    y = "Predicted GabRat",
+    color = "Substrate"
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    legend.key.width = unit(1.5, "cm"),
+    axis.title = element_text(face = "bold"),
+    strip.text = element_text(size = 13, face = "bold")
+  )
+
+m3_plot
+
+# Save high-resolution figure
+ggsave(
+  file.path(base_dir, "data/images/m3_plot.png"),
+  m3_plot,
+  width = 9,
+  height = 4,
+  dpi = 600
+)
+```
+
+# Visualize on black
+```{r}
+library(tidybayes)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+data_m3_final$background_type <- factor(
+  data_m3_final$background_type,
+  levels = c("Algae","Lafoea","Other hydroid","Sertulariidae")
+)
+
+# Prediction grid
+chrom_grid <- expand.grid(
+  PC_value = seq(-2, 2, length.out = 100),
+  PC_axis = c("PC1_z","PC2_z","PC3_z"),
+  background_type = unique(data_m3_final$background_type)
+)
+
+chrom_grid <- chrom_grid %>%
+  mutate(
+    PC1_z = ifelse(PC_axis == "PC1_z", PC_value, 0),
+    PC2_z = ifelse(PC_axis == "PC2_z", PC_value, 0),
+    PC3_z = ifelse(PC_axis == "PC3_z", PC_value, 0)
+  )
+
+# Posterior predictions
+chrom_pred <- add_epred_draws(
+  m3_full_int,
+  newdata = chrom_grid,
+  re_formula = NA
+)
+
+# Colorblind-safe palette
+substrate_cols <- c(
+  "Algae" = "#F0A202",        # bright orange (stands out)
+  "Lafoea" = "#4DBBD5",       # bright cyan
+  "Other hydroid" = "#2C7FB8",# mid blue
+  "Sertulariidae" = "#7FDBFF" # pale cyan
+)
+
+# Plot
+m3_plot <- ggplot(
+  chrom_pred,
+  aes(
+    x = PC_value,
+    y = .epred,
+    color = background_type,
+    fill = background_type
+  )
+) +
+
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.3, color = "#FAFAFA") +
+
+  stat_lineribbon(
+    .width = 0.95,
+    alpha = 0.22,
+    linewidth = 0
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 2
+  ) +
+
+  facet_wrap(
+    ~PC_axis,
+    nrow = 1,
+    labeller = labeller(
+      PC_axis = c(
+        PC1_z = "PC1",
+        PC2_z = "PC2",
+        PC3_z = "PC3"
+      )
+    )
+  ) +
+
+  scale_color_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  scale_fill_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  guides(
+    fill = "none",
+    color = guide_legend(
+      override.aes = list(
+        fill = NA,
+        linewidth = 2
+      )
+    )
+  ) +
+
+  labs(
+    x = "Phenotype axis (SD units)",
+    y = "Predicted GabRat",
+    color = "Substrate"
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    # backgrounds
+    plot.background  = element_rect(fill = "black", colour = NA),
+    panel.background = element_rect(fill = "black", colour = NA),
+
+    # remove grids
+    panel.grid = element_blank(),
+
+    # axis styling
+    axis.line = element_line(color = "#FAFAFA", linewidth = 0.8),
+    axis.ticks = element_line(color = "#FAFAFA"),
+
+    # text
+    axis.title = element_text(face = "bold", color = "#FAFAFA"),
+    axis.text  = element_text(color = "#FAFAFA"),
+
+    # facet labels
+    strip.background = element_rect(
+      fill = "black",
+      colour = "#FAFAFA",
+      linewidth = 0.8
+    ),
+    strip.text = element_text(
+      size = 13,
+      face = "bold",
+      color = "#FAFAFA"
+    ),
+
+    # legend
+    legend.position = "bottom",
+    legend.background = element_rect(fill = "black"),
+    legend.key = element_rect(fill = "black"),
+    legend.title = element_text(face = "bold", color = "#FAFAFA"),
+    legend.text = element_text(color = "#FAFAFA")
+  )
+
+m3_plot
+
+# Save high-resolution figure
+ggsave(
+  file.path(base_dir, "data/images/m3_plot_black.png"),
+  m3_plot,
+  width = 9,
+  height = 4,
+  dpi = 600,
+  bg = "black"
+)
+```
+
+
+This model answers:
+
+Do some substrates inherently produce higher/lower chromatic similarity?
+
+Do phenotype axes explain variation in similarity across backgrounds?
+

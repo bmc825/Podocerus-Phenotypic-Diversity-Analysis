@@ -1,0 +1,985 @@
+---
+title: "Chromatic Contrast (EMD) of Podocerus aff. cristatus to backgrounds"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+
+set.seed(5678)
+```
+
+```{r}
+# Source the package setup script
+source("project_directory/Podocerus/R_files/scripts/00_setup_packages.R")
+
+# Source the custom graphing functions
+source("project_directory/Podocerus/R_files/scripts/01_graphing_functions.R")
+
+```
+
+
+#-------------- DATA PREPARATION -----------------
+
+# Set paths
+```{r}
+base_dir <- "project_directory/Podocerus"
+
+pod_dir <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model1/ROI_input/DORSAL_BODY/")
+
+substrate_dir <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model1/ROI_input/SUB_ALL/")
+
+meta_pod_path <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model1/metadata/metadata_pods.xlsx")
+
+meta_sub_path <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model1/metadata/metadata_substrate.xlsx")
+
+pca_rds_path <- file.path(base_dir,
+  "data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+
+```
+
+# Extract histograms from amphipod ROIs
+```{r}
+library(colordistance)
+library(tidyverse)
+library(readxl)
+
+lower <- c(0, 0, 0)
+upper <- c(0.01, 0.01, 0.01)
+bins  <- c(3, 3, 3)
+
+image_paths <- list.files(
+  pod_dir,
+  pattern = "\\.png$",
+  full.names = TRUE
+)
+
+amphipod_hists <- lapply(
+  image_paths,
+  function(p) {
+    colordistance::getImageHist(
+      image = p,
+      bins  = bins,
+      lower = lower,
+      upper = upper
+    )
+  }
+)
+
+names(amphipod_hists) <-
+  tools::file_path_sans_ext(basename(image_paths))
+```
+
+# Extract histograms from substrate ROIs and average
+```{r}
+#First make averaging function
+average_hists_by_prefix <- function(
+  substrate_dir,
+  bins,
+  lower,
+  upper,
+  pattern = "\\.png$"
+) {
+
+  stopifnot(dir.exists(substrate_dir))
+
+  # 1. Get image paths
+  image_paths <- list.files(
+    substrate_dir,
+    pattern = pattern,
+    full.names = TRUE
+  )
+
+  if (length(image_paths) == 0) {
+    stop("No images found in substrate_dir.")
+  }
+
+  # 2. Extract histograms for each ROI
+  substrate_hists <- lapply(
+    image_paths,
+    function(p) {
+      colordistance::getImageHist(
+        image = p,
+        bins  = bins,
+        lower = lower,
+        upper = upper
+      )
+    }
+  )
+
+  # 3. Name histograms using file stems
+  names(substrate_hists) <-
+    tools::file_path_sans_ext(basename(image_paths))
+
+  # 4. Create grouping key (remove trailing _SUB#)
+  stems <- names(substrate_hists)
+
+  group_key <- sub("(?i)_SUB\\d+$", "", stems, perl = TRUE)
+
+  split_idx <- split(seq_along(substrate_hists), group_key)
+
+  # 5. Average histograms within each group
+  averaged <- lapply(split_idx, function(idx) {
+
+    group_hists <- substrate_hists[idx]
+
+    # Sanity check: same number of rows (same bins)
+    n_rows <- sapply(group_hists, nrow)
+    if (length(unique(n_rows)) != 1) {
+      stop("Histogram bin mismatch within group.")
+    }
+
+    # Identify numeric columns (usually r, g, b, pct)
+    numeric_cols <- names(group_hists[[1]])[
+      sapply(group_hists[[1]], is.numeric)
+    ]
+
+    # Average numeric columns
+    avg_hist <- group_hists[[1]]
+    avg_hist[numeric_cols] <-
+      Reduce(`+`, lapply(group_hists, `[`, numeric_cols)) / length(group_hists)
+
+    avg_hist
+  })
+
+  return(averaged)
+}
+
+# Now run the function
+lower <- c(0, 0, 0)
+upper <- c(0.01, 0.01, 0.01)
+bins  <- c(3, 3, 3)
+
+substrate_hists_avg <- average_hists_by_prefix(
+  substrate_dir = substrate_dir,
+  bins = bins,
+  lower = lower,
+  upper = upper
+)
+```
+
+
+# Compute EMD matrix
+```{r}
+all_hists <- c(amphipod_hists, substrate_hists_avg)
+
+dist_matrix <- getColorDistanceMatrix(
+  cluster.list = all_hists,
+  method   = "emd",
+  ordering = FALSE,
+  plotting = FALSE
+)
+```
+
+# Extract Amphipod × Substrate block
+```{r}
+# Extract Amphipod × Substrate block
+pod_names <- names(amphipod_hists)
+sub_names <- names(substrate_hists_avg)
+
+emd_block <- dist_matrix[pod_names, sub_names, drop = FALSE]
+
+# Remove diagonal explicitly
+common_ids <- intersect(pod_names, sub_names)
+emd_block[cbind(common_ids, common_ids)] <- NA
+
+# Convert to long format and drop NA
+EMD_data <- as_tibble(emd_block, rownames = "Amphipod_Image") %>%
+  pivot_longer(
+    -Amphipod_Image,
+    names_to = "Substrate_Image",
+    values_to = "EMD"
+  ) %>%
+  filter(!is.na(EMD))
+
+# Clean image names ONCE
+EMD_data_clean <- EMD_data %>%
+  mutate(
+    Amphipod_Image  = tools::file_path_sans_ext(basename(Amphipod_Image)),
+    Substrate_Image = tools::file_path_sans_ext(basename(Substrate_Image)),
+    Amphipod_Image  = trimws(Amphipod_Image),
+    Substrate_Image = trimws(Substrate_Image)
+  ) %>%
+  filter(Amphipod_Image != Substrate_Image)
+```
+
+# Load amphipod and substrate metadata and merge
+```{r}
+library(tidyverse)
+library(readxl)
+library(stringr)
+
+# -------------------------------
+# 1) Load amphipod metadata
+# -------------------------------
+
+amphipod_metadata <- read_excel(meta_pod_path) %>%
+  mutate(
+    Amphipod_Image = tools::file_path_sans_ext(basename(Amphipod_Image)),
+    Amphipod_Image = trimws(Amphipod_Image)
+  )
+
+# -------------------------------
+# 2) Load substrate lookup table
+# -------------------------------
+
+substrate_lookup <- read_excel(meta_sub_path) %>%
+  mutate(
+    Substrate_Image = stringr::str_replace(Substrate_Image, "^SUB_", "BCPD_"),
+    Substrate_Image = trimws(Substrate_Image)
+  ) %>%
+  dplyr::select(Substrate_Image, Substrate_type) %>%
+  distinct()
+
+# -------------------------------
+# 3) Merge everything
+# -------------------------------
+
+data_m1_pre <- EMD_data_clean %>%
+  left_join(substrate_lookup,  by = "Substrate_Image") %>%
+  left_join(amphipod_metadata, by = "Amphipod_Image")
+
+# -------------------------------
+# 4) Create native match variable
+# -------------------------------
+
+data_m1 <- data_m1_pre %>%
+  mutate(
+    Is_native_match =
+      Origin_microhabitat == Substrate_type
+  )
+
+# -------------------------------
+# 5) Sanity checks
+# -------------------------------
+
+cat("Rows:", nrow(data_m1), "\n")
+cat("Missing substrate types:", sum(is.na(data_m1$Substrate_type)), "\n")
+cat("Missing amphipod metadata:", sum(is.na(data_m1$Origin_microhabitat)), "\n")
+```
+
+# Determine how many PCs to keep for models 
+```{r}
+pca_obj <- readRDS(pca_rds_path)
+
+# ---- Prepare PCA data ----
+eig_vals <- pca_obj$sdev^2
+var_explained <- eig_vals / sum(eig_vals)
+cum_var <- cumsum(var_explained)
+
+scree_df <- tibble(
+  PC = seq_along(var_explained),
+  Variance = var_explained,
+  Cumulative = cum_var
+)
+
+
+
+# ---- Plot ----
+scree_plot <- ggplot(
+  scree_df %>% filter(PC <= 20),
+  aes(x = PC)
+) +
+  
+  # Bars (variance explained)
+  geom_col(
+    aes(y = Variance),
+    fill = "grey40",
+    width = 0.7
+  ) +
+  
+  # Cumulative line (same axis)
+  geom_line(
+    aes(y = Cumulative),
+    linewidth = 0.9
+  ) +
+  geom_point(
+    aes(y = Cumulative),
+    size = 2
+  ) +
+  
+  # Mark PC3 cutoff
+  geom_vline(
+    xintercept = 3,
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  
+  scale_x_continuous(breaks = 1:20) +
+  scale_y_continuous(
+    limits = c(0, 0.5),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  
+  labs(
+    x = "Principal Component",
+    y = "Proportion of Variance Explained"
+  ) +
+  
+  theme_classic(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    panel.grid = element_blank()
+  )
+
+scree_plot
+
+ggsave(
+  file.path(base_dir, "data/images/PC_scree_plot.png"),
+  scree_plot,
+  width = 7,
+  height = 5,
+  dpi = 600
+)
+
+# We will choose 3 PCs, since that marks the point of diminishing returns in total explained variance
+```
+
+# Merge PCA scores into model data and standardize
+```{r}
+#Load scores
+pc_scores <- pca_obj$x %>%
+  as.data.frame() %>%                 # preserve rownames
+  tibble::rownames_to_column("Amphipod_Image") %>%
+  mutate(
+    Amphipod_Image = gsub("_unwarped$", "", Amphipod_Image),
+    Amphipod_Image = trimws(Amphipod_Image)
+  ) %>%
+  dplyr::select(Amphipod_Image, PC1, PC2, PC3)
+
+#Merge
+data_m1_pca <- data_m1 %>%
+  left_join(pc_scores, by = "Amphipod_Image")
+
+#Standardize
+data_m1_final <- data_m1_pca %>%
+  mutate(
+    PC1_z = as.numeric(scale(PC1)),
+    PC2_z = as.numeric(scale(PC2)),
+    PC3_z = as.numeric(scale(PC3)),
+    Amphipod_Image = factor(Amphipod_Image),
+    Substrate_type = factor(Substrate_type)
+  )
+```
+
+# Look at data
+```{r}
+summary(data_m1_final$EMD)
+hist(data_m1_final$EMD, breaks = 40)
+```
+
+# Save output
+```{r}
+write_csv(
+  data_m1_final,
+  file = "project_directory/Podocerus/data/photos/COLORDISTANCE_Model1/data_m1_final.csv"
+)
+```
+
+# Choose model and priors
+We will use Generalized Linear Models (GLMs) because our response variables are continuous, non-negative, and right-skewed, which violates the assumptions of linear regression. 
+
+We will use Bayesian methods to account for repeated comparisons among amphipods and background images, allowing variation among individuals and images to be modeled explicitly.
+
+The Gamma distribution with a log link function allows us to model continuous, non-negative, and right-skewed data.
+
+The Gamma distribution is parameterized as:
+
+$$
+y_{i} &\sim \text{Gamma}(\mu_{i}, \phi)
+$$
+
+The mean $\mu_i$ (on the log scale) is modeled as:
+
+$$
+\log(\mu_{i}) = \alpha + \beta x_{i} \\
+$$
+
+Where:
+
+-   **$y_{i}$**: Response variable for observation $i$
+
+-   **$\mu_{i}$**: Mean of the Gamma distribution for $i$ (on the log scale)
+
+-   **$\phi$**: Shape parameter (controls variability)
+
+-   **$\alpha$**: Intercept, mean value of $\log(\mu)$ when predictors are at baseline
+
+-   **$beta$**: Coefficient/slope for predictor $x_{i}$, representing the effect of $x_{i}$ on $\log(\mu)$
+
+---
+
+**Intercept ($\alpha$)**: The intercept represents the expected value of the response variable when all predictors are at their baseline values (i.e., the reference substrate category and standardized PC scores equal to 0). Because the model uses a Gamma distribution with a log link, the intercept is defined on the $\log(\mu)$ scale.
+
+We specify a weakly informative prior centered at zero on the log scale:
+
+$$
+\alpha \sim N(0, 1)
+$$
+
+Centering the intercept at zero corresponds to a baseline expected value of:
+
+$$
+e^{0} = 1
+$$
+
+on the original response scale. This provides a neutral starting point that does not strongly favor either large or small baseline chromatic distances.
+
+With a standard deviation of 1, approximately 95% of prior mass lies within:
+
+$$
+0 \pm 2
+$$
+
+on the log scale. On the original (exponentiated) scale, this corresponds to:
+
+$$
+e^{-2} \approx 0.14 \quad \text{to} \quad e^{2} \approx 7.39
+$$
+
+This range spans more than an order of magnitude of possible baseline chromatic distances, allowing substantial flexibility while discouraging implausibly extreme values. Because the prior is weakly informative relative to the observed data, posterior estimates are primarily determined by the likelihood rather than the prior specification.
+
+---
+
+**Slope ($\beta$)**: The slope reflects the rate of change in $\log(\mu)$ for a one-unit change in the predictor. Because a log link is used, slopes are multiplicative on the original scale.
+
+We specify weakly informative priors:
+
+$$
+\beta \sim N(0, 0.5)
+$$
+
+Here, 0.5 represents the **standard deviation** of the prior. Approximately 95% of values fall within:
+
+$$
+\pm 2(0.5) = -1.0 \text{ to } 1.0
+$$
+
+On the exponentiated (multiplicative) scale, this corresponds to:
+
+$$
+e^{-1.0} \approx 0.37 \quad \text{to} \quad e^{1.0} \approx 2.72
+$$
+
+Thus, a one-unit increase in a predictor is allowed to scale $\mu$ between approximately 0.37× and 2.72× its baseline value, accommodating moderate positive or negative effects while discouraging extreme values.
+
+The multiplicative interpretation follows from:
+
+$$
+\begin{aligned}
+\frac{y_{x+1}}{y_x}
+&= \frac{e^{(\alpha + \beta(x+1))}}{e^{(\alpha + \beta x)}} \\
+&= e^{\beta}
+\end{aligned}
+$$
+
+Thus:
+
+- If $\beta = 0.1$, a one-unit increase in the predictor scales $\mu$ by $e^{0.1} \approx 1.10$ (a 10% increase).
+- If $\beta = -0.1$, a one-unit increase scales $\mu$ by $e^{-0.1} \approx 0.91$ (a 9% decrease).
+
+---
+
+**Random effects ($\sigma$)**: Random intercepts capture variation among experimental units that is not explained by the fixed effects.
+
+In this model, both amphipod individuals and background images are allowed to have their own baseline levels of chromatic similarity. This accounts for repeated comparisons involving the same amphipods and the same background images and prevents image-specific or individual-specific differences from inflating fixed-effect estimates.
+
+These deviations are modeled as random variability around the population mean and summarized by their standard deviation ($\sigma$).
+
+
+---
+
+**Shape parameter ($\phi$)**: In a Gamma distribution, variability is governed by the shape parameter ($\phi$), which determines how dispersion relates to the mean. Smaller $\phi$ values correspond to greater variance, while larger values imply tighter clustering around the mean.
+
+We specify a weakly informative prior:
+
+$$
+\phi \sim \text{Gamma}(2, 0.1)
+$$
+
+This prior allows a wide range of plausible dispersion values while preventing extreme or implausible variability. The data primarily determine the posterior estimate of $\phi$.
+
+---
+
+```{r}
+data_m1_final <- read.csv("project_directory/Podocerus/data/photos/COLORDISTANCE_Model1/data_m1_final.csv")
+```
+
+# Build model
+Do phenotypes predict chromatic contrast?
+```{r}
+
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m1_full_int <- brm(
+  EMD ~ Substrate_type *
+    (PC1_z + PC2_z + PC3_z) +
+    (1 | Amphipod_Image) +
+    (1 | Substrate_Image),
+  data = data_m1_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m1_full_int,
+  file = "project_directory/Podocerus/data/models/m1_full_int.rds"
+)
+```
+
+# Check model performance
+Convergence: Check for Rhat ≈ 1.00 and Bulk ESS > 1000
+```{r}
+summary(m1_full_int)
+```
+
+Posterior predictive check
+```{r}
+pp_check(m1_full_int, type = "dens_overlay")
+```
+
+# Compare to reduced models
+```{r}
+# No interaction
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m1_full <- brm(
+  EMD ~ Substrate_type +
+    PC1_z + PC2_z + PC3_z +
+    (1 | Amphipod_Image) +
+    (1 | Substrate_Image),
+  data = data_m1_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m1_full,
+  file = "project_directory/Podocerus/data/models/m1_full.rds"
+)
+
+
+# No phenotype predictors
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m1_reduced <- brm(
+  EMD ~ Substrate_type +
+    (1 | Amphipod_Image)+
+    (1 | Substrate_Image),
+  data = data_m1_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m1_reduced,
+  file = "project_directory/Podocerus/data/models/m1_reduced.rds"
+)
+
+
+# No predictors other than random effects
+priors <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m1_null <- brm(
+  EMD ~ (1 | Amphipod_Image) +
+    (1 | Substrate_Image),
+  data = data_m1_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+
+saveRDS(
+  m1_null,
+  file = "project_directory/Podocerus/data/models/m1_null.rds"
+)
+```
+
+```{r}
+m1_full_int <- add_criterion(m1_full_int, "loo")
+m1_full <- add_criterion(m1_full, "loo")
+m1_reduced <- add_criterion(m1_reduced, "loo")
+m1_null <- add_criterion(m1_null, "loo")
+
+# Save models with loo so you don't have to do this again
+saveRDS(
+  m1_full_int,
+  file = "project_directory/Podocerus/data/models/m1_full_int.rds"
+)
+saveRDS(
+  m1_full,
+  file = "project_directory/Podocerus/data/models/m1_full.rds"
+)
+saveRDS(
+  m1_reduced,
+  file = "project_directory/Podocerus/data/models/m1_reduced.rds"
+)
+saveRDS(
+  m1_null,
+  file = "project_directory/Podocerus/data/models/m1_null.rds"
+)
+```
+
+
+```{r}
+m1_full_int <- readRDS("project_directory/Podocerus/data/models/m1_full_int.rds")
+
+m1_full <- readRDS("project_directory/Podocerus/data/models/m1_full.rds")
+
+m1_reduced <- readRDS("project_directory/Podocerus/data/models/m1_reduced.rds")
+
+m1_null <- readRDS("project_directory/Podocerus/data/models/m1_null.rds")
+
+
+loo_m1 <- loo_compare(m1_full_int, m1_full, m1_reduced, m1_null)
+
+loo_m1
+
+#Save LOO as a table
+df_loo_m1 <- as.data.frame(loo_m1) %>%
+  rownames_to_column(var = "Model")
+
+# Save loo as tables
+write.table(
+  df_loo_m1,
+  "project_directory/Podocerus/data/tables/table_loo_m1.csv",
+  sep = ",",
+  row.names = TRUE,
+  col.names = TRUE
+)
+```
+
+# Visualize
+
+```{r}
+library(tidybayes)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+data_m1_final$Substrate_type <- factor(
+  data_m1_final$Substrate_type,
+  levels = c("Algae","Lafoea","Other_hydroid","Sertulariidae")
+)
+
+# Prediction grid
+chrom_grid <- expand.grid(
+  PC_value = seq(-2, 2, length.out = 100),
+  PC_axis = c("PC1_z","PC2_z","PC3_z"),
+  Substrate_type = unique(data_m1_final$Substrate_type)
+)
+
+chrom_grid <- chrom_grid %>%
+  mutate(
+    PC1_z = ifelse(PC_axis == "PC1_z", PC_value, 0),
+    PC2_z = ifelse(PC_axis == "PC2_z", PC_value, 0),
+    PC3_z = ifelse(PC_axis == "PC3_z", PC_value, 0)
+  )
+
+# Posterior predictions
+chrom_pred <- add_epred_draws(
+  m1_full_int,
+  newdata = chrom_grid,
+  re_formula = NA
+)
+
+# Colorblind-safe palette
+substrate_cols <- c(
+  "Algae" = "#E69F00",        # orange (distinct)
+  "Lafoea" = "#08306B",       # dark blue
+  "Other_hydroid" = "#2171B5",# medium blue
+  "Sertulariidae" = "#6BAED6" # light blue
+)
+
+# Plot
+m1_plot <- ggplot(
+  chrom_pred,
+  aes(
+    x = PC_value,
+    y = .epred,
+    color = Substrate_type,
+    fill = Substrate_type
+  )
+) +
+
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.3) +
+
+  stat_lineribbon(
+    .width = 0.95,
+    alpha = 0.22,
+    linewidth = 0
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 2
+  ) +
+
+  facet_wrap(
+    ~PC_axis,
+    nrow = 1,
+    labeller = labeller(
+      PC_axis = c(
+        PC1_z = "PC1",
+        PC2_z = "PC2",
+        PC3_z = "PC3"
+      )
+    )
+  ) +
+
+  scale_color_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other_hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  scale_fill_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other_hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  guides(
+    fill = "none",
+    color = guide_legend(
+      override.aes = list(
+        fill = NA,
+        linewidth = 2
+      )
+    )
+  ) +
+
+  labs(
+    x = "Phenotype axis (SD units)",
+    y = "Predicted EMD",
+    color = "Substrate"
+  ) +
+
+  theme_classic(base_size = 14) +
+
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    legend.key.width = unit(1.5, "cm"),
+    axis.title = element_text(face = "bold"),
+    strip.text = element_text(size = 13, face = "bold")
+  )
+
+m1_plot
+
+# Save high-resolution figure
+ggsave(
+  file.path(base_dir, "data/images/m1_plot.png"),
+  m1_plot,
+  width = 9,
+  height = 4,
+  dpi = 600
+)
+```
+
+# Visualize on black
+```{r}
+library(tidybayes)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+data_m1_final$Substrate_type <- factor(
+  data_m1_final$Substrate_type,
+  levels = c("Algae","Lafoea","Other_hydroid","Sertulariidae")
+)
+
+# Prediction grid
+chrom_grid <- expand.grid(
+  PC_value = seq(-2, 2, length.out = 100),
+  PC_axis = c("PC1_z","PC2_z","PC3_z"),
+  Substrate_type = unique(data_m1_final$Substrate_type)
+)
+
+chrom_grid <- chrom_grid %>%
+  mutate(
+    PC1_z = ifelse(PC_axis == "PC1_z", PC_value, 0),
+    PC2_z = ifelse(PC_axis == "PC2_z", PC_value, 0),
+    PC3_z = ifelse(PC_axis == "PC3_z", PC_value, 0)
+  )
+
+# Posterior predictions
+chrom_pred <- add_epred_draws(
+  m1_full_int,
+  newdata = chrom_grid,
+  re_formula = NA
+)
+
+# Colorblind-safe palette
+substrate_cols <- c(
+  "Algae" = "#F0A202",        # bright orange (stands out)
+  "Lafoea" = "#4DBBD5",       # bright cyan
+  "Other_hydroid" = "#2C7FB8",# mid blue
+  "Sertulariidae" = "#7FDBFF" # pale cyan
+)
+
+# Plot
+m1_plot <- ggplot(
+  chrom_pred,
+  aes(
+    x = PC_value,
+    y = .epred,
+    color = Substrate_type,
+    fill = Substrate_type
+  )
+) +
+
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.3, color = "#FAFAFA") +
+
+  stat_lineribbon(
+    .width = 0.95,
+    alpha = 0.22,
+    linewidth = 0
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "line",
+    linewidth = 2
+  ) +
+
+  facet_wrap(
+    ~PC_axis,
+    nrow = 1,
+    labeller = labeller(
+      PC_axis = c(
+        PC1_z = "PC1",
+        PC2_z = "PC2",
+        PC3_z = "PC3"
+      )
+    )
+  ) +
+
+  scale_color_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other_hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  scale_fill_manual(
+    values = substrate_cols,
+    breaks = c("Algae","Lafoea","Other_hydroid","Sertulariidae"),
+    labels = c("Red algae","Lafoea","Other hydroid","Sertulariidae")
+  ) +
+
+  guides(
+    fill = "none",
+    color = guide_legend(
+      override.aes = list(
+        fill = NA,
+        linewidth = 2
+      )
+    )
+  ) +
+
+  labs(
+    x = "Phenotype axis (SD units)",
+    y = "Predicted EMD",
+    color = "Substrate"
+  ) +
+
+  theme_classic(base_size = 14) +
+  
+  theme(
+    # backgrounds
+    plot.background  = element_rect(fill = "black", colour = NA),
+    panel.background = element_rect(fill = "black", colour = NA),
+  
+    # remove grids
+    panel.grid = element_blank(),
+  
+    # axis styling
+    axis.line = element_line(color = "#FAFAFA", linewidth = 0.8),
+    axis.ticks = element_line(color = "#FAFAFA"),
+  
+    # text
+    axis.title = element_text(face = "bold", color = "#FAFAFA"),
+    axis.text  = element_text(color = "#FAFAFA"),
+  
+    # facet labels
+    strip.background = element_rect(
+      fill = "black",
+      colour = "#FAFAFA",
+      linewidth = 0.8
+    ),
+    strip.text = element_text(
+      size = 13,
+      face = "bold",
+      color = "#FAFAFA"
+    ),
+  
+    # legend
+    legend.position = "bottom",
+    legend.background = element_rect(fill = "black"),
+    legend.key = element_rect(fill = "black"),
+    legend.title = element_text(face = "bold", color = "#FAFAFA"),
+    legend.text = element_text(color = "#FAFAFA")
+  )
+
+m1_plot
+
+# Save high-resolution figure
+ggsave(
+  file.path(base_dir, "data/images/m1_plot_black.png"),
+  m1_plot,
+  width = 9,
+  height = 4,
+  dpi = 600,
+  bg = "black"
+)
+```
+This model answers:
+
+Do some substrates inherently produce higher/lower chromatic similarity?
+
+Do phenotype axes explain variation in similarity across backgrounds?
+

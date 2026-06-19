@@ -1,0 +1,1179 @@
+---
+title: "Chromatic Contrast (EMD) of Podocerus aff. cristatus to Nudibranchs"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+
+set.seed(5678)
+```
+
+```{r}
+# Source the package setup script
+source("project_directory/Podocerus/R_files/scripts/00_setup_packages.R")
+
+# Source the custom graphing functions
+source("project_directory/Podocerus/R_files/scripts/01_graphing_functions.R")
+
+```
+
+
+#-------------- DATA PREPARATION -----------------
+
+# Set paths
+```{r}
+base_dir <- "project_directory/Podocerus"
+
+pod_dir <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/ROI_input/PODS/")
+
+nud_dir <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/ROI_input/NUDIBRANCHS/")
+
+sub_dir <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/ROI_input/SUB_ALL/")
+
+epi_dir <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/ROI_input/SUB_BRYO/")
+
+meta_pod_path <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/metadata/metadata_pods.xlsx")
+
+meta_nud_path <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/metadata/metadata_nudibranchs.xlsx")
+
+meta_sub_path <- file.path(base_dir,
+  "data/photos/COLORDISTANCE_Model5/metadata/metadata_substrate.xlsx")
+
+pca_rds_path <- file.path(base_dir,
+  "data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+```
+
+# Extract histograms from amphipod ROIs
+```{r}
+library(colordistance)
+library(tidyverse)
+library(readxl)
+
+lower <- c(0, 0, 0)
+upper <- c(0.01, 0.01, 0.01)
+bins  <- c(3, 3, 3)
+
+pod_paths <- list.files(pod_dir, pattern="\\.png$", full.names=TRUE)
+
+pod_hists <- lapply(pod_paths, function(p) {
+  colordistance::getImageHist(
+    image = p,
+    bins = bins,
+    lower = lower,
+    upper = upper
+  )
+})
+
+names(pod_hists) <- tools::file_path_sans_ext(basename(pod_paths))
+```
+
+# Extract histograms from nudibranch ROIs
+```{r}
+lower <- c(0, 0, 0)
+upper <- c(0.01, 0.01, 0.01)
+bins  <- c(3, 3, 3)
+
+nud_paths <- list.files(nud_dir, pattern="\\.png$", full.names=TRUE)
+
+nud_hists <- lapply(nud_paths, function(p) {
+  colordistance::getImageHist(
+    image = p,
+    bins = bins,
+    lower = lower,
+    upper = upper
+  )
+})
+
+names(nud_hists) <- tools::file_path_sans_ext(basename(nud_paths))
+```
+
+# Extract histograms from substrate ROIs and average
+```{r}
+#First make averaging function
+average_hists_by_prefix <- function(
+  substrate_dir,
+  bins,
+  lower,
+  upper,
+  pattern = "\\.png$"
+) {
+
+  stopifnot(dir.exists(substrate_dir))
+
+  # 1. Get image paths
+  image_paths <- list.files(
+    substrate_dir,
+    pattern = pattern,
+    full.names = TRUE
+  )
+
+  if (length(image_paths) == 0) {
+    stop("No images found in substrate_dir.")
+  }
+
+  # 2. Extract histograms for each ROI
+  substrate_hists <- lapply(
+    image_paths,
+    function(p) {
+      colordistance::getImageHist(
+        image = p,
+        bins  = bins,
+        lower = lower,
+        upper = upper
+      )
+    }
+  )
+
+  # 3. Name histograms using file stems
+  names(substrate_hists) <-
+    tools::file_path_sans_ext(basename(image_paths))
+
+  # 4. Create grouping key (remove trailing _SUB#)
+  stems <- names(substrate_hists)
+
+  group_key <- sub("(?i)_SUB\\d+$", "", stems, perl = TRUE)
+
+  split_idx <- split(seq_along(substrate_hists), group_key)
+
+  # 5. Average histograms within each group
+  averaged <- lapply(split_idx, function(idx) {
+
+    group_hists <- substrate_hists[idx]
+
+    # Sanity check: same number of rows (same bins)
+    n_rows <- sapply(group_hists, nrow)
+    if (length(unique(n_rows)) != 1) {
+      stop("Histogram bin mismatch within group.")
+    }
+
+    # Identify numeric columns (usually r, g, b, pct)
+    numeric_cols <- names(group_hists[[1]])[
+      sapply(group_hists[[1]], is.numeric)
+    ]
+
+    # Average numeric columns
+    avg_hist <- group_hists[[1]]
+    avg_hist[numeric_cols] <-
+      Reduce(`+`, lapply(group_hists, `[`, numeric_cols)) / length(group_hists)
+
+    avg_hist
+  })
+
+  return(averaged)
+}
+
+# Now run the function
+lower <- c(0, 0, 0)
+upper <- c(0.01, 0.01, 0.01)
+bins  <- c(3, 3, 3)
+
+sub_hists <- average_hists_by_prefix(
+  substrate_dir = sub_dir,
+  bins = bins,
+  lower = lower,
+  upper = upper
+)
+```
+
+# Extract histograms from epifauna (bryozoan) ROIs
+```{r}
+lower <- c(0, 0, 0)
+upper <- c(0.01, 0.01, 0.01)
+bins  <- c(3, 3, 3)
+
+# Extract histograms from epifauna (BRYO) ROIs — DO NOT average
+epi_paths <- list.files(epi_dir, pattern="\\.png$", full.names=TRUE)
+
+epi_hists <- lapply(epi_paths, function(p) {
+  colordistance::getImageHist(
+    image = p,
+    bins = bins,
+    lower = lower,
+    upper = upper
+  )
+})
+
+names(epi_hists) <- tools::file_path_sans_ext(basename(epi_paths))
+```
+
+
+
+# Compute EMD matrix
+```{r}
+all_hists <- c(pod_hists, nud_hists, sub_hists, epi_hists)
+
+dist_matrix <- getColorDistanceMatrix(
+  cluster.list = all_hists,
+  method = "emd",
+  ordering = FALSE,
+  plotting = FALSE
+)
+```
+
+# Extract Amphipod × Nudibranch block
+```{r}
+# Extract Amphipod × Substrate block
+pod_names <- names(pod_hists)
+nud_names <- names(nud_hists)
+
+emd_nud <- dist_matrix[pod_names, nud_names, drop=FALSE]
+
+nud_df <- as_tibble(emd_nud, rownames="Amphipod_Image") %>%
+  pivot_longer(
+    -Amphipod_Image,
+    names_to="Reference_Image",
+    values_to="EMD"
+  ) %>%
+  mutate(
+    Reference_type = "Nudibranch"
+  )
+```
+
+# Extract Amphipod × Substrate block
+```{r}
+pod_names <- names(pod_hists)
+sub_names <- names(sub_hists)
+
+emd_sub <- dist_matrix[pod_names, sub_names, drop=FALSE]
+
+sub_df <- as_tibble(emd_sub, rownames="Amphipod_Image") %>%
+  pivot_longer(
+    -Amphipod_Image,
+    names_to="Reference_Image",
+    values_to="EMD"
+  ) %>%
+  mutate(
+    Reference_type = "Substrate",
+    Reference_Image = sub("^BCPD_", "SUB_", Reference_Image)
+  )
+```
+
+# Extract Amphipod × Epifauna block
+```{r}
+pod_names <- names(pod_hists)
+epi_names <- names(epi_hists)
+
+epi_names <- names(epi_hists)
+
+emd_epi <- dist_matrix[pod_names, epi_names, drop=FALSE]
+
+epi_df <- as_tibble(emd_epi, rownames="Amphipod_Image") %>%
+  pivot_longer(
+    -Amphipod_Image,
+    names_to="Reference_Image",
+    values_to="EMD"
+  ) %>%
+  mutate(
+    Reference_type = "Epifauna"
+  )
+
+epi_df <- epi_df %>%
+  mutate(
+    Reference_type = "Epifauna"
+  )
+```
+
+
+# Combine data
+```{r}
+EMD_data <- bind_rows(nud_df, sub_df, epi_df) %>%
+  filter(!is.na(EMD)) %>%
+  mutate(
+    Amphipod_Image = tools::file_path_sans_ext(basename(Amphipod_Image)),
+    Reference_Image = tools::file_path_sans_ext(basename(Reference_Image)),
+    Reference_type = factor(Reference_type)
+  )
+```
+
+
+# Clean column names to match metadata, if needed
+```{r}
+EMD_data_clean <- EMD_data
+
+glimpse(EMD_data_clean)
+
+```
+
+# Load amphipod and substrate metadata and merge. We don't need to do this for epifauna since there is only one category which we will just call "Epifauna".
+```{r}
+library(tidyverse)
+library(readxl)
+
+# -------------------------------
+# 2) Load amphipod metadata
+# -------------------------------
+
+amphipod_metadata <- read_excel(meta_pod_path) %>%
+  mutate(
+    Amphipod_Image = tools::file_path_sans_ext(basename(Amphipod_Image)),
+    Amphipod_Image = trimws(Amphipod_Image)
+  )
+
+# -------------------------------
+# 3) Load nudibranch lookup table
+# -------------------------------
+nud_lookup <- read_excel(meta_nud_path) %>%
+  mutate(
+    Reference_Image = tools::file_path_sans_ext(basename(Nud_Image)),
+    Reference_Image = trimws(Reference_Image)
+  ) %>%
+  dplyr::select(Reference_Image, Reference_group) %>%
+  distinct()
+
+# -------------------------------
+# 3b) Load substrate metadata
+# -------------------------------
+substrate_metadata <- read_excel(meta_sub_path) %>%
+  mutate(
+    Reference_Image = Substrate_Image
+  ) %>%
+  dplyr::select(Reference_Image, Substrate_type) %>%
+  distinct()
+
+# -------------------------------
+# 4) Merge everything
+# -------------------------------
+
+data_m5_pre <- EMD_data_clean %>%
+  left_join(nud_lookup, by = "Reference_Image") %>%
+  left_join(substrate_metadata, by = "Reference_Image") %>%
+  left_join(amphipod_metadata, by = "Amphipod_Image")
+
+data_m5_pre <- data_m5_pre %>%
+  mutate(
+    Reference_group = case_when(
+      Reference_type == "Nudibranch" ~ Reference_group,
+      Reference_type == "Substrate" ~ Substrate_type,
+      Reference_type == "Epifauna" ~ "Epifauna"
+    )
+  )
+
+data_m5_pre <- data_m5_pre %>%
+  filter(
+  Reference_group == "Aeolid_model" |
+  Reference_type == "Substrate" |
+  Reference_type == "Epifauna"
+  )
+
+# -------------------------------
+# 5) Sanity checks
+# -------------------------------
+
+cat("Rows:", nrow(data_m5_pre), "\n")
+cat("Missing reference groups:", sum(is.na(data_m5_pre$Reference_group)), "\n")
+cat("Missing amphipod metadata:", sum(is.na(data_m5_pre$Origin_microhabitat)), "\n")
+```
+
+#Define WO vs Other phenotype category
+```{r}
+
+# CHANGE THIS COLUMN NAME to whatever your amphipod metadata uses
+# (e.g., Morph, Morph_final, Morph_visual, Phenotype, etc.)
+# Define phenotype categories for mimicry analysis
+# Separate WO, solid white, and all remaining morphs
+
+data_m5_final <- data_m5_pre %>%
+  mutate(
+    Phenotype = case_when(
+      Morph_visual == "WO" ~ "WO",
+      Morph_visual == "W" ~ "W",
+      TRUE ~ "Other"
+    ),
+    Phenotype = factor(
+      Phenotype,
+      levels = c("Other", "W", "WO")
+    )
+  )
+
+# Sanity check
+cat("Rows:", nrow(data_m5_final), "\n")
+cat("Phenotype counts:\n")
+print(table(data_m5_final$Phenotype, useNA = "ifany"))
+
+
+```
+
+
+
+# Look at data
+```{r}
+summary(data_m5_final$EMD)
+hist(data_m5_final$EMD, breaks = 40)
+```
+
+# Save output
+```{r}
+write_csv(
+  data_m5_final,
+  file = "project_directory/Podocerus/data/photos/COLORDISTANCE_Model5/data_m5_final.csv"
+)
+```
+
+# Choose model and priors
+We will use Generalized Linear Models (GLMs) because our response variables are continuous, non-negative, and right-skewed, which violates the assumptions of linear regression. 
+
+We will use Bayesian methods to account for repeated comparisons among amphipods and background images, allowing variation among individuals and images to be modeled explicitly.
+
+The Gamma distribution with a log link function allows us to model continuous, non-negative, and right-skewed data.
+
+The Gamma distribution is parameterized as:
+
+$$
+y_{i} &\sim \text{Gamma}(\mu_{i}, \phi)
+$$
+
+The mean $\mu_i$ (on the log scale) is modeled as:
+
+$$
+\log(\mu_{i}) = \alpha + \beta x_{i} \\
+$$
+
+Where:
+
+-   **$y_{i}$**: Response variable for observation $i$
+
+-   **$\mu_{i}$**: Mean of the Gamma distribution for $i$ (on the log scale)
+
+-   **$\phi$**: Shape parameter (controls variability)
+
+-   **$\alpha$**: Intercept, mean value of $\log(\mu)$ when predictors are at baseline
+
+-   **$\beta$**: Coefficient/slope for predictor $x_{i}$, representing the effect of $x_{i}$ on $\log(\mu)$
+
+---
+
+**Intercept ($\alpha$)**: The intercept represents the expected value of the response variable when all predictors are at their baseline values (i.e., the reference substrate category and standardized PC scores equal to 0). Because the model uses a Gamma distribution with a log link, the intercept is defined on the $\log(\mu)$ scale.
+
+We specify a weakly informative prior centered at zero on the log scale:
+
+$$
+\alpha \sim N(0, 1)
+$$
+
+Centering the intercept at zero corresponds to a baseline expected value of:
+
+$$
+e^{0} = 1
+$$
+
+on the original response scale. This provides a neutral starting point that does not strongly favor either large or small baseline chromatic distances.
+
+With a standard deviation of 1, approximately 95% of prior mass lies within:
+
+$$
+0 \pm 2
+$$
+
+on the log scale. On the original (exponentiated) scale, this corresponds to:
+
+$$
+e^{-2} \approx 0.14 \quad \text{to} \quad e^{2} \approx 7.39
+$$
+
+This range spans more than an order of magnitude of possible baseline chromatic distances, allowing substantial flexibility while discouraging implausibly extreme values. Because the prior is weakly informative relative to the observed data, posterior estimates are primarily determined by the likelihood rather than the prior specification.
+
+---
+
+**Slope ($\beta$)**: The slope reflects the rate of change in $\log(\mu)$ for a one-unit change in the predictor. Because a log link is used, slopes are multiplicative on the original scale.
+
+We specify weakly informative priors:
+
+$$
+\beta \sim N(0, 0.5)
+$$
+
+Here, 0.5 represents the **standard deviation** of the prior. Approximately 95% of values fall within:
+
+$$
+\pm 2(0.5) = -1.0 \text{ to } 1.0
+$$
+
+On the exponentiated (multiplicative) scale, this corresponds to:
+
+$$
+e^{-1.0} \approx 0.37 \quad \text{to} \quad e^{1.0} \approx 2.72
+$$
+
+Thus, a one-unit increase in a predictor is allowed to scale $\mu$ between approximately 0.37× and 2.72× its baseline value, accommodating moderate positive or negative effects while discouraging extreme values.
+
+The multiplicative interpretation follows from:
+
+$$
+\begin{aligned}
+\frac{y_{x+1}}{y_x}
+&= \frac{e^{(\alpha + \beta(x+1))}}{e^{(\alpha + \beta x)}} \\
+&= e^{\beta}
+\end{aligned}
+$$
+
+Thus:
+
+- If $\beta = 0.1$, a one-unit increase in the predictor scales $\mu$ by $e^{0.1} \approx 1.10$ (a 10% increase).
+- If $\beta = -0.1$, a one-unit increase scales $\mu$ by $e^{-0.1} \approx 0.91$ (a 9% decrease).
+
+---
+
+**Random effects ($\sigma$)**: Random intercepts capture variation among experimental units that is not explained by the fixed effects.
+
+In this model, both amphipod individuals and background images are allowed to have their own baseline levels of chromatic similarity. This accounts for repeated comparisons involving the same amphipods and the same background images and prevents image-specific or individual-specific differences from inflating fixed-effect estimates.
+
+These deviations are modeled as random variability around the population mean and summarized by their standard deviation ($\sigma$).
+
+
+---
+
+**Shape parameter ($\phi$)**: In a Gamma distribution, variability is governed by the shape parameter ($\phi$), which determines how dispersion relates to the mean. Smaller $\phi$ values correspond to greater variance, while larger values imply tighter clustering around the mean.
+
+We specify a weakly informative prior:
+
+$$
+\phi \sim \text{Gamma}(2, 0.1)
+$$
+
+This prior allows a wide range of plausible dispersion values while preventing extreme or implausible variability. The data primarily determine the posterior estimate of $\phi$.
+
+---
+
+```{r}
+data_m5_final <- read.csv("project_directory/Podocerus/data/photos/COLORDISTANCE_Model5/data_m5_final.csv")
+```
+
+# Build model
+Do phenotypes predict chromatic contrast?
+```{r}
+#Set reference for comparison group
+data_m5_final$Reference_group <- relevel(
+  factor(data_m5_final$Reference_group),
+  ref = "Aeolid_model"
+)
+
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m5_full <- brm(
+  EMD ~ Phenotype * Reference_group +
+    (1 | Amphipod_Image) +
+    (1 | Reference_Image),
+  data = data_m5_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m5_full,
+  file = "project_directory/Podocerus/data/models/m5_full.rds"
+)
+```
+
+# Check model performance
+Convergence: Check for Rhat ≈ 1.00 and Bulk ESS > 1000
+```{r}
+summary(m5_full)
+```
+
+Posterior predictive check
+```{r}
+pp_check(m5_full, type = "dens_overlay")
+```
+
+# Compare to reduced models
+```{r}
+# No phenotype predictors
+priors <- c(
+  prior(normal(0, 0.5), class = "b"),
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m5_reduced <- brm(
+  EMD ~ Reference_group +
+    (1 | Amphipod_Image) +
+    (1 | Reference_Image),
+  data = data_m5_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+saveRDS(
+  m5_reduced,
+  file = "project_directory/Podocerus/data/models/m5_reduced.rds"
+)
+
+
+# No predictors other than random effects
+priors <- c(
+  prior(normal(0, 1), class = "Intercept"),
+  prior(gamma(2, 0.1), class = "shape")
+)
+
+m5_null <- brm(
+  EMD ~ (1 | Amphipod_Image) +
+    (1 | Reference_Image),
+  data = data_m5_final,
+  family = Gamma(link = "log"),
+  prior = priors,
+  save_pars = save_pars(all = TRUE),
+  chains = 2,
+  iter = 6000,
+  warmup = 3000,
+  control = list(adapt_delta = 0.99, max_treedepth = 12)
+)
+
+saveRDS(
+  m5_null,
+  file = "project_directory/Podocerus/data/models/m5_null.rds"
+)
+```
+
+```{r}
+m5_full <- add_criterion(m5_full, "loo")
+m5_reduced <- add_criterion(m5_reduced, "loo")
+m5_null <- add_criterion(m5_null, "loo")
+
+# Save models with loo so you don't have to do this again
+saveRDS(
+  m5_full,
+  file = "project_directory/Podocerus/data/models/m5_full.rds"
+)
+saveRDS(
+  m5_reduced,
+  file = "project_directory/Podocerus/data/models/m5_reduced.rds"
+)
+saveRDS(
+  m5_null,
+  file = "project_directory/Podocerus/data/models/m5_null.rds"
+)
+```
+
+
+```{r}
+
+m5_full <- readRDS("project_directory/Podocerus/data/models/m5_full.rds")
+
+m5_reduced <- readRDS("project_directory/Podocerus/data/models/m5_reduced.rds")
+
+m5_null <- readRDS("project_directory/Podocerus/data/models/m5_null.rds")
+
+
+loo_m5 <- loo_compare(m5_full, m5_reduced, m5_null)
+
+loo_m5
+
+#Save LOO as a table
+df_loo_m5 <- as.data.frame(loo_m5) %>%
+  rownames_to_column(var = "Model")
+
+# Save loo as tables
+write.table(
+  df_loo_m5,
+  "project_directory/Podocerus/data/tables/table_loo_m5.csv",
+  sep = ",",
+  row.names = TRUE,
+  col.names = TRUE
+)
+```
+
+# Emmeans to compare W to WO
+```{r}
+library(emmeans)
+
+emm2 <- emmeans(m5_full, ~ Reference_group | Phenotype)
+
+pairs(emm2)
+```
+
+
+# Visualize
+```{r}
+library(emmeans)
+library(tidyverse)
+
+# Get marginal means on response scale
+emm <- emmeans(
+  m5_full,
+  ~ Phenotype * Reference_group,
+  type = "response"
+)
+
+# Compute additive contrasts vs "Other"
+contr <- contrast(
+  emm,
+  method = "trt.vs.ctrl",
+  ref = "Other",
+  by = "Reference_group",
+  type = "response",
+  ratio = FALSE
+)
+
+contr_df <- as.data.frame(summary(contr))
+
+# Clean phenotype labels
+contr_df <- contr_df %>%
+  mutate(
+    Phenotype = case_when(
+      contrast == "W - Other" ~ "White",
+      contrast == "WO - Other" ~ "White-orange"
+    )
+  )
+
+# Order reference groups
+contr_df$Reference_group <- factor(
+  contr_df$Reference_group,
+  levels = c(
+    "Aeolid_model",
+    "Epifauna",
+    "Lafoea",
+    "Other_hydroid",
+    "Sertulariidae",
+    "Algae"
+  )
+)
+
+phenotype_cols <- c(
+  "White-orange" = "#E69F00",
+  "White" = "#0072B2"
+)
+
+# Plot additive differences
+m5_plot <- ggplot(
+  contr_df,
+  aes(
+    x = Reference_group,
+    y = estimate,
+    color = Phenotype
+  )
+) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point(
+    position = position_dodge(width = 0.35),
+    size = 3
+  ) +
+  geom_errorbar(
+    aes(ymin = lower.HPD, ymax = upper.HPD),
+    position = position_dodge(width = 0.35),
+    width = 0
+  ) +
+  scale_color_manual(values = phenotype_cols) +
+  scale_x_discrete(
+    labels = c(
+      Aeolid_model = "Nudibranch model",
+      Epifauna = "Bryozoan epifauna",
+      Lafoea = "Lafoea hydroids",
+      Other_hydroid = "Other hydroids",
+      Sertulariidae = "Sertulariidae hydroids",
+      Algae = "Algae"
+    )
+  ) +
+  coord_flip() +
+  theme_classic() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    axis.title.y = element_blank()
+  ) +
+  guides(color = guide_legend(nrow = 1)) +
+  labs(
+    x = "Reference group",
+    y = "Difference in chromatic distance"
+  )
+
+ggsave(
+  file.path(base_dir, "data/images/m5_plot.png"),
+  m5_plot,
+  width = 6,
+  height = 6,
+  dpi = 600
+)
+```
+
+# Visualize on black
+```{r}
+library(emmeans)
+library(tidyverse)
+
+# Get marginal means on response scale
+emm <- emmeans(
+  m5_full,
+  ~ Phenotype * Reference_group,
+  type = "response"
+)
+
+# Compute additive contrasts vs "Other"
+contr <- contrast(
+  emm,
+  method = "trt.vs.ctrl",
+  ref = "Other",
+  by = "Reference_group",
+  type = "response",
+  ratio = FALSE
+)
+
+contr_df <- as.data.frame(summary(contr))
+
+# Clean phenotype labels
+contr_df <- contr_df %>%
+  mutate(
+    Phenotype = case_when(
+      contrast == "W - Other" ~ "White",
+      contrast == "WO - Other" ~ "White-orange"
+    )
+  )
+
+# Order reference groups
+contr_df$Reference_group <- factor(
+  contr_df$Reference_group,
+  levels = c(
+    "Aeolid_model",
+    "Epifauna",
+    "Lafoea",
+    "Other_hydroid",
+    "Sertulariidae",
+    "Algae"
+  )
+)
+
+phenotype_cols <- c(
+  "White-orange" = "orange",
+  "White" = "white"
+)
+
+# Plot additive differences
+m5_plot <- ggplot(
+  contr_df,
+  aes(
+    x = Reference_group,
+    y = estimate,
+    color = Phenotype
+  )
+) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point(
+    position = position_dodge(width = 0.35),
+    size = 3
+  ) +
+  geom_errorbar(
+    aes(ymin = lower.HPD, ymax = upper.HPD),
+    position = position_dodge(width = 0.35),
+    width = 0
+  ) +
+  scale_color_manual(values = phenotype_cols) +
+  scale_x_discrete(
+    labels = c(
+      Aeolid_model = "Nudibranch model",
+      Epifauna = "Bryozoan epifauna",
+      Lafoea = "Lafoea hydroids",
+      Other_hydroid = "Other hydroids",
+      Sertulariidae = "Sertulariidae hydroids",
+      Algae = "Algae"
+    )
+  ) +
+  coord_flip() +
+  theme_classic() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    axis.title.y = element_blank()
+  ) +
+  guides(color = guide_legend(nrow = 1)) +
+  labs(
+    x = "Reference group",
+    y = "Difference in chromatic distance"
+  )
+
+ggsave(
+  file.path(base_dir, "data/images/m5_plot.png"),
+  m5_plot,
+  width = 6,
+  height = 6,
+  dpi = 600
+)
+```
+
+# Visualize on black
+```{r}
+library(emmeans)
+library(tidyverse)
+
+# Get marginal means on response scale
+emm <- emmeans(
+  m5_full,
+  ~ Phenotype * Reference_group,
+  type = "response"
+)
+
+# Compute additive contrasts vs "Other"
+contr <- contrast(
+  emm,
+  method = "trt.vs.ctrl",
+  ref = "Other",
+  by = "Reference_group",
+  type = "response",
+  ratio = FALSE
+)
+
+contr_df <- as.data.frame(summary(contr))
+
+# Clean phenotype labels
+contr_df <- contr_df %>%
+  mutate(
+    Phenotype = case_when(
+      contrast == "W - Other" ~ "White",
+      contrast == "WO - Other" ~ "White-orange"
+    )
+  )
+
+# Order reference groups
+contr_df$Reference_group <- factor(
+  contr_df$Reference_group,
+  levels = c(
+    "Aeolid_model",
+    "Epifauna",
+    "Lafoea",
+    "Other_hydroid",
+    "Sertulariidae",
+    "Algae"
+  )
+)
+
+phenotype_cols <- c(
+  "White-orange" = "orange",
+  "White" = "white"
+)
+
+# Plot additive differences
+m5_plot <- ggplot(
+  contr_df,
+  aes(
+    x = Reference_group,
+    y = estimate,
+    color = Phenotype
+  )
+) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "white") +
+  geom_point(
+    position = position_dodge(width = 0.35),
+    size = 3
+  ) +
+  geom_errorbar(
+    aes(ymin = lower.HPD, ymax = upper.HPD),
+    position = position_dodge(width = 0.35),
+    width = 0
+  ) +
+  scale_color_manual(values = phenotype_cols) +
+  scale_x_discrete(
+    labels = c(
+      Aeolid_model = "Nudibranch model",
+      Epifauna = "Bryozoan epifauna",
+      Lafoea = "Lafoea hydroids",
+      Other_hydroid = "Other hydroids",
+      Sertulariidae = "Sertulariidae hydroids",
+      Algae = "Red algae"
+    )
+  ) +
+  coord_flip() +
+  theme_classic() +
+  theme(
+    # backgrounds
+    plot.background  = element_rect(fill = "black", colour = NA),
+    panel.background = element_rect(fill = "black", colour = NA),
+
+    # remove grids
+    panel.grid = element_blank(),
+
+    # axis styling
+    axis.line = element_line(color = "white", linewidth = 0.8),
+    axis.ticks = element_line(color = "white"),
+
+    # text
+    axis.text = element_text(size = 11, color = "white"),
+    axis.title = element_text(size = 13, color = "white"),
+    axis.title.y = element_blank(),
+
+    # legend
+    legend.position = "top",
+    legend.background = element_rect(fill = "black"),
+    legend.key = element_rect(fill = "black"),
+    legend.text = element_text(color = "white"),
+    legend.title = element_blank()
+  ) +
+  guides(color = guide_legend(nrow = 1)) +
+  labs(
+    x = "Reference group",
+    y = "Difference in chromatic distance"
+  )
+
+ggsave(
+  file.path(base_dir, "data/images/m5_plot_black.png"),
+  m5_plot,
+  width = 6,
+  height = 6,
+  dpi = 600,
+  bg = "black"
+)
+```
+
+# Visualize on black
+```{r}
+library(emmeans)
+library(tidyverse)
+
+# Get marginal means on response scale
+emm <- emmeans(
+  m5_full,
+  ~ Phenotype * Reference_group,
+  type = "response"
+)
+
+# Compute additive contrasts vs "Other"
+contr <- contrast(
+  emm,
+  method = "trt.vs.ctrl",
+  ref = "Other",
+  by = "Reference_group",
+  type = "response",
+  ratio = FALSE
+)
+
+contr_df <- as.data.frame(summary(contr))
+
+# Clean phenotype labels
+contr_df <- contr_df %>%
+  mutate(
+    Phenotype = case_when(
+      contrast == "W - Other" ~ "White",
+      contrast == "WO - Other" ~ "White-orange"
+    )
+  )
+
+# Order reference groups
+contr_df$Reference_group <- factor(
+  contr_df$Reference_group,
+  levels = c(
+    "Aeolid_model",
+    "Epifauna",
+    "Lafoea",
+    "Other_hydroid",
+    "Sertulariidae",
+    "Algae"
+  )
+)
+
+phenotype_cols <- c(
+  "White-orange" = "orange",
+  "White" = "#FAFAFA"
+)
+
+
+# Plot additive differences
+m5_plot <- ggplot(
+  contr_df,
+  aes(
+    x = Reference_group,
+    y = estimate,
+    color = Phenotype
+  )
+) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "#FAFAFA") +
+  geom_point(
+    position = position_dodge(width = 0.35),
+    size = 3,
+    stroke = 0.6
+  ) +
+  geom_errorbar(
+    aes(ymin = lower.HPD, ymax = upper.HPD),
+    position = position_dodge(width = 0.35),
+    width = 0
+  ) +
+  scale_color_manual(values = phenotype_cols) +
+  scale_x_discrete(
+    labels = c(
+      Aeolid_model = "Nudibranch model",
+      Epifauna = "Bryozoan epifauna",
+      Lafoea = "Lafoea hydroids",
+      Other_hydroid = "Other hydroids",
+      Sertulariidae = "Sertulariidae hydroids",
+      Algae = "Red algae"
+    )
+  ) +
+  coord_flip() +
+  theme_classic() +
+  theme(
+    # backgrounds
+    plot.background  = element_rect(fill = "black", colour = NA),
+    panel.background = element_rect(fill = "black", colour = NA),
+
+    # remove grids
+    panel.grid = element_blank(),
+
+    # axis styling
+    axis.line = element_line(color = "#FAFAFA", linewidth = 0.8),
+    axis.ticks = element_line(color = "#FAFAFA"),
+
+    # text
+    axis.text = element_text(size = 18, color = "#FAFAFA", face = "bold"),
+    axis.title = element_text(size = 18, color = "#FAFAFA"),
+    axis.title.y = element_blank(),
+
+    # legend
+    legend.position = "top",
+    legend.background = element_rect(fill = "black"),
+    legend.key = element_rect(fill = "black"),
+    legend.text = element_text(color = "#FAFAFA", size = 18),
+    legend.title = element_blank()
+  ) +
+  guides(color = guide_legend(nrow = 1)) +
+  labs(
+    x = "Reference group",
+    y = "Difference in chromatic distance"
+  )
+
+ggsave(
+  file.path(base_dir, "data/images/m5_plot_black.png"),
+  m5_plot,
+  width = 8,
+  height = 6,
+  dpi = 600,
+  bg = "black"
+)
+```
+
+
+
+This model answers:
+
+1️⃣ Are WO morphs closest to the nudibranch model?
+2️⃣ Are white morphs also close to the model?
+3️⃣ Are WO morphs closer to the model than white morphs?
+[ADD HERE]

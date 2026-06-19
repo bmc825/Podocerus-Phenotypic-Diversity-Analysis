@@ -1,0 +1,1205 @@
+---
+title: "Phylogenetic Analysis of Podocerus aff. cristatus"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+---
+
+```{r}
+
+# Source the package setup script
+source("project_directory/Podocerus/R_files/scripts/00_setup_packages.R")
+
+# Source the custom graphing functions
+source("project_directory/Podocerus/R_files/scripts/01_graphing_functions.R")
+```
+
+
+# Phylogenetic Analysis
+
+---
+
+## Question
+
+How do color types vary with geographic location and species-level genetic markers?
+
+---
+
+## Objective
+
+Investigate the influence of **color types** and **geographic location** on *P. cristatus* species-level genetic diversity.
+
+---
+
+## Method
+*Note: If running the commands below in Rstudio or VS Code, highlight and use Ctrl+Alt+Enter to copy and run the command in the terminal.*
+
+
+
+### 1. Clean and assemble sequence data.
+
+Before conducting a phylogenetic analysis on sequence data, it is essential to clean and assemble the raw sequence reads. Since we are working with Sanger data and a limited number of markers, this process will be performed manually using Geneious software.
+
+Refer to the "Geneious Sequence Analysis Protocol" for detailed instructions on completing this process.
+
+
+
+---
+
+### 2. Upload genetic data to remote server.
+
+The phylogenetic pipeline is easier to do if we use Joe's servers since everything is already installed on his computers. Thus, we will upload our CO1, CYTB, and H3 sequence data to the servers using ```scp``` in commandline or manually via Cyberduck. *If needed, we can do this on our local computer (either through terminal or software), but we would need to install MEGA and IQ-TREE first.*
+
+
+
+scp [local_directory]/[FOLDER_CONTAINING_CO1_FASTA_SEQUENCES]/*.fasta
+bcummings@10.251.34.23:/bwdata3/bcummings/PODOCERUS/00-DATA/CO1
+
+scp [local_directory]/[FOLDER_CONTAINING_CYTB_FASTA_SEQUENCES]/*.fasta
+bcummings@10.251.34.23:/bwdata3/bcummings/PODOCERUS/00-DATA/CYTB
+
+scp [local_directory]/[FOLDER_CONTAINING_H3_FASTA_SEQUENCES]/*.fasta bcummings@10.251.34.23:/bwdata3/bcummings/PODOCERUS/00-DATA/H3
+
+
+### 3. Navigate to data on server.
+
+Log into remote server and navigate to folder containing sequence files.
+
+
+
+```bash
+ssh bcummings@10.251.34.217
+
+cd /bwdata3/bcummings/PODOCERUS/00-DATA/
+```
+
+
+
+### 4. Sequence Alignment & Filtering
+
+We will generate multiple sequence alignments for each genetic marker. To assess the robustness of this dataset to gap filtering, we will generate two gap-filtered alignments and one unfiltered alignment. 
+
+#### Concatenation
+
+First, concatenate the sequences into one file.
+
+
+
+```bash
+mkdir -p /bwdata3/bcummings/PODOCERUS/01-MAFFT/input
+
+# CO1
+cat /bwdata3/bcummings/PODOCERUS/00-DATA/CO1/*.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CO1_sequences.fasta
+
+# CYTB
+cat /bwdata3/bcummings/PODOCERUS/00-DATA/CYTB/*.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CYTB_sequences.fasta
+
+# H3
+cat /bwdata3/bcummings/PODOCERUS/00-DATA/H3/*.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/H3_sequences.fasta
+
+
+
+# CO1 ONLY, NO OUTGROUPS (for ASAP species delimitation below)
+
+find /bwdata3/bcummings/PODOCERUS/00-DATA/CO1/ -type f -name "*.fasta" ! -iname "A_gigantea.fasta" ! -iname "BCBC-0012_FL_nomorph.fasta" ! -iname "BCQ-022_NZ_nomorph.fasta" -print | xargs cat > /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CO1_sequences_no_outgroups.fasta
+
+# CYTB ONLY, NO OUTGROUPS (for ASAP species delimitation below)
+
+find /bwdata3/bcummings/PODOCERUS/00-DATA/CYTB/ -type f -name "*.fasta" ! -iname "A_gigantea.fasta" ! -iname "BCBC-0012_FL_nomorph.fasta" ! -iname "BCQ-022_NZ_nomorph.fasta" -print | xargs cat > /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CYTB_sequences_no_outgroups.fasta
+
+# H3 ONLY, NO OUTGROUPS (for ASAP species delimitation below)
+
+find /bwdata3/bcummings/PODOCERUS/00-DATA/H3/ -type f -name "*.fasta" ! -iname "A_gigantea.fasta" ! -iname "BCBC-0012_FL_nomorph.fasta" ! -iname "BCQ-022_NZ_nomorph.fasta" -print | xargs cat > /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/H3_sequences_no_outgroups.fasta
+
+```
+
+
+
+#### Multiple Sequence Alignment
+
+We will generate multiple sequence alignments using MAFFT. We will use the 
+L-INS-i alignment strategy which uses an iterative refinement method incorporating local pairwise alignment information. This method is recommended by the author for alignments <200 sequences of variable lengths.
+
+
+
+```bash
+mkdir -p /bwdata3/bcummings/PODOCERUS/01-MAFFT/output
+
+# CO1
+mafft --localpair --maxiterate 1000 /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CO1_sequences.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CO1_MSA.fasta
+
+
+# CO1, NO OUTGROUPS (for ASAP species delimitation below)
+mafft --localpair --maxiterate 1000 /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CO1_sequences_no_outgroups.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CO1_no_outgroups_MSA.fasta
+
+
+# CYTB
+mafft --localpair --maxiterate 1000 /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CYTB_sequences.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CYTB_MSA.fasta
+
+
+# CYTB, NO OUTGROUPS (for ASAP species delimitation below)
+mafft --localpair --maxiterate 1000 /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/CYTB_sequences_no_outgroups.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CYTB_no_outgroups_MSA.fasta
+
+
+# H3
+mafft --localpair --maxiterate 1000 /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/H3_sequences.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/H3_MSA.fasta
+
+
+# H3, NO OUTGROUPS (for ASAP species delimitation below)
+mafft --localpair --maxiterate 1000 /bwdata3/bcummings/PODOCERUS/01-MAFFT/input/H3_sequences_no_outgroups.fasta > /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/H3_no_outgroups_MSA.fasta
+
+```
+
+
+
+
+### 5. Format Sequences
+
+Use ```{r}ename_fasta_headers.pl```` script to remove all text following the first string in the file deflines. This allows for concatenatation of sequences based on species name in the next section.
+
+
+
+```bash
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_no_outgroups
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups
+
+
+# CO1
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none
+perl /bwdata3/bcummings/SCRIPTS/rename_fasta_headers.pl /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CO1_MSA.fasta CO1_MSA_renamed.fa
+
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_no_outgroups
+perl /bwdata3/bcummings/SCRIPTS/rename_fasta_headers.pl /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CO1_no_outgroups_MSA.fasta CO1_no_outgroups_MSA_renamed.fa
+
+
+# CYTB
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none
+perl /bwdata3/bcummings/SCRIPTS/rename_fasta_headers.pl /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CYTB_MSA.fasta CYTB_MSA_renamed.fa
+
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_no_outgroups
+perl /bwdata3/bcummings/SCRIPTS/rename_fasta_headers.pl /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/CYTB_no_outgroups_MSA.fasta CYTB_no_outgroups_MSA_renamed.fa
+
+
+# H3
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none
+perl /bwdata3/bcummings/SCRIPTS/rename_fasta_headers.pl /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/H3_MSA.fasta H3_MSA_renamed.fa
+
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_no_outgroups
+perl /bwdata3/bcummings/SCRIPTS/rename_fasta_headers.pl /bwdata3/bcummings/PODOCERUS/01-MAFFT/output/H3_no_outgroups_MSA.fasta H3_no_outgroups_MSA_renamed.fa
+
+
+# For H3 + CYTB only tree
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_CYTB_H3_ONLY
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY
+cd /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_CYTB_H3_ONLY
+cp /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none/CYTB_MSA_renamed.fa /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none/H3_MSA_renamed.fa .
+
+
+```
+
+
+### 6. Concatenate and Partition Genes
+
+For each set of genes (unfiltered, ClipKit gap-filtered, TrimAl gap-filtered), we will a use slightly modified version of the ```fasta2phylomatrix.pl``` script (available as a script within the JFR Perl Modules distribution (as of v1.1):  https://github.com/josephryan/JFR-PerlModules) to concatenate sequences across individuals and generate a partition file which specifies the starting and ending positions of each gene within the sequence matrix. Then we will use the custom script ```partition_to_nexus_edit.pl``` to convert the partition file to .nex format.
+
+
+
+```bash
+# CYTB + H3
+perl /bwdata3/bcummings/SCRIPTS/fasta2phylomatrix_edit.pl --dir=/bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_CYTB_H3_ONLY --partition=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY/partitions.txt > /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY/concatenated.fa
+
+perl /bwdata3/bcummings/SCRIPTS/partition_to_nexus_edit.pl --input=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY/partitions.txt --output=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY/partitions.nex
+
+
+
+# CO1 + CYTB + H3
+perl /bwdata3/bcummings/SCRIPTS/fasta2phylomatrix_edit.pl --dir=/bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none --partition=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/partitions.txt > /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/concatenated.fa
+
+perl /bwdata3/bcummings/SCRIPTS/partition_to_nexus_edit.pl --input=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/partitions.txt --output=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/partitions.nex
+
+
+
+
+# CO1 + CYTB + H3, NO OUTGROUPS (for species delimitation below) -- this is for guide tree for constructing input tree for PTP & mPTP below
+
+perl /bwdata3/bcummings/SCRIPTS/fasta2phylomatrix_edit.pl --dir=/bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_no_outgroups --partition=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/partitions_no_outgroups.txt > /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/concatenated_no_outgroups.fa
+
+perl /bwdata3/bcummings/SCRIPTS/partition_to_nexus_edit.pl --input=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/partitions_no_outgroups.txt --output=/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/partitions_no_outgroups.nex
+
+
+# CO1 (for PTP & mPTP species delimitation below since we can exclude outgroups in those programs)
+## NO CONCATENATION OR PARTITION FILES NEEDED FOR THIS ONE. JUST COPY IT OVER.
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CO1
+
+cp /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none/CO1_MSA_renamed.fa /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CO1/CO1.fa
+
+
+# CO1, NO OUTGROUPS (for ASAP species delimitation below since we cannot exclude outgroups in that program)
+## NO CONCATENATION OR PARTITION FILES NEEDED FOR THIS ONE. JUST COPY IT OVER.
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups
+
+cp /bwdata3/bcummings/PODOCERUS/04-PARTITION/input/none_no_outgroups/CO1_no_outgroups_MSA_renamed.fa /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/CO1_no_outgroups.fa
+
+```
+
+
+
+### 7. Build Species Trees
+
+We will use our full gene sets to generate concatenated supermatrices which will be used in tree construction.
+
+We will first use IQ-TREE (Nguyen et al 2014) to estimate species trees using maximum-likelihood (ML) methods. The matrices will be partitioned by gene region. We will compare trees constructed from partitioned supermatrices generated from nucleotide data (-st DNA). We will use ModelFinder (-m MFP+MERGE) (Kalyaanamoorthy et al 2017) to find the best partition scheme and evolutionary substitution model for each partition.
+
+Because max-likelihood methods might inflate the length of outgroup branches, we will also use FastTree (Price et al 2009) and MEGA 12 to to estimate species trees. FASTTREE uses a variant of neighbor-joining with ML methods (we will use the GTR model for nucleotides). MEGA 12 will just use neighbor-joining methods. These methods might produce the same topology, but with fewer long branches (better for viewing).
+
+We will construct a total of 3 species trees (1 gap-unfiltered, 2 gap-filtered) using each method, and compare the topology to determine how robust the data is to gap-filtering. If topology is the same, we will choose a tree with gap-unfiltered data to minimize data loss. We will then run the CO1 gene trees using this concatenated species tree as a guide tree.
+
+
+```bash
+#IQ-TREE
+
+# ALL DATA
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none
+mkdir -p /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CYTB_H3_ONLY
+mkdir -p /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CO1
+mkdir -p /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_no_outgroups
+
+
+#CYTB + H3 ONLY
+cd /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CYTB_H3_ONLY
+iqtree -s /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY/concatenated.fa -spp /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CYTB_H3_ONLY/partitions.nex -m MFP+MERGE -st DNA -bb 1000 -nt AUTO -pre nogapfiltering
+
+
+# CO1 + CYTB + H3
+cd /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none
+iqtree -s /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/concatenated.fa -spp /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/partitions.nex -m MFP+MERGE -st DNA -bb 1000 -nt AUTO -pre nogapfiltering
+
+
+
+# CO1 + CYTB + H3, NO OUTGROUPS (for species delimitation below) -- this is for guide tree for constructing input tree for PTP & mPTP below
+
+cd /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_no_outgroups
+iqtree -s /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/concatenated_no_outgroups.fa -spp /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/partitions_no_outgroups.nex -m MFP+MERGE -st DNA -bb 1000 -nt AUTO -pre nogapfiltering_no_outgroups
+
+# CO1 (for PTP & mPTP species delimitation below since we can exclude outgroups in those programs)
+cd /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CO1
+iqtree -s /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CO1/CO1.fa -g /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none/nogapfiltering.treefile -m MFP+MERGE -st DNA -bb 1000 -nt AUTO -pre nogapfiltering_CO1
+
+# CO1, NO OUTGROUPS (for ASAP species delimitation below since we cannot exclude outgroups in that program)
+cd /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_no_outgroups
+iqtree -s /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/CO1_no_outgroups.fa -g /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_no_outgroups/nogapfiltering_no_outgroups.treefile -m MFP+MERGE -st DNA -bb 1000 -nt AUTO -pre nogapfiltering_CO1_no_outgroups
+
+```
+
+
+```bash
+#FASTRREE
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/FASTTREE/none
+
+# CO1 + CYTB + H3
+cd /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/FASTTREE/none
+FastTreeMP -slow -gamma -gtr -nt /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/concatenated.fa > nogapfiltering_FASTTREE.tre
+
+
+```
+
+```bash
+#MEGA X
+
+# Download concatenated data and run in MEGA on your local PC
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none/concatenated.fa "C:/Users/bmc82/Documents/UF/PhD_Projects/DISSERTATION_MANUSCRIPT/Chapter_3/chapter3_data_analysis/data/tree_DNA/CO1_CYTB_H3"
+
+
+# OPEN ALIGNMENTS ON MEGA ON LOCAL PC, AND CONSTRUCT TREE USING NEIGHBOR-JOINING METHODS
+
+
+```
+If you are on a remote server, download data and tree files to local computer.
+
+
+
+```bash
+logout
+
+# CYTB + H3 (IQTREE)
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CYTB_H3_ONLY/nogapfiltering.contree "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CYTB_H3_TEST"
+
+# CO1 + CYTB + H3 (IQTREE)
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none/nogapfiltering.contree "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3_TEST"
+
+
+# CO1 + CYTB + H3 (FASTTREE)
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/FASTTREE/none/nogapfiltering_FASTTREE.tre "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3"
+
+
+
+#(for species delimitation below) -- this is for guide tree for constructing input tree for PTP & mPTP below
+# CO1 + CYTB + H3, NO OUTGROUPS (IQTREE ONLY)
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CO1/nogapfiltering_CO1.contree "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1"
+
+# CO1 (for PTP & mPTP species delimitation below)
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CO1/nogapfiltering_CO1.contree "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1"
+
+# CO1, NO OUTGROUPS (for ASAP species delimitation below)
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_no_outgroups/nogapfiltering_CO1_no_outgroups.contree "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_no_outgroups"
+
+```
+
+
+
+### 8. Visualize Species Trees
+
+Use R (shown below) or FigTree software to visualize final species tree topologies.
+
+
+```{r}
+
+
+# Load necessary libraries
+library(ape)
+library(ggtree)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+
+# Load trees with bootstrap values
+tree <- read.tree("project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3/nogapfiltering.contree")
+
+
+# Load metadata
+metadata <- read.csv("project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3/metadata.csv")
+
+
+# Root trees
+outgroup <- c("A_gigantea")
+rooted_tree <- root(tree, outgroup, resolve.root = TRUE)
+
+# Create ggtree objects
+tree <- ggtree(rooted_tree) + ggtitle("Podocerus cristatus Species Tree (no gap filtering)")
+
+# Join metadata
+metat <- tree$data %>% inner_join(metadata, by = c("label" = "id"))
+
+# Add bootstrap values to tree visualization (static plots)
+p_tree_static <- tree +
+    geom_text2(aes(subset = !isTip, label = label), hjust = -0.3, size = 3) +  # Display bootstrap values only on internal nodes
+    geom_point(data = metat, aes(x = x, y = y, color = group_location), size = 2) +
+    geom_treescale(x = 0, y = -2, width = 0.03, fontsize = 3, linesize = 1, offset = 1) +
+    theme(legend.position = "right")
+
+
+# Save static plots
+ggsave("project_directory/Podocerus/Data/images/p_tree_static.png", plot = p_tree_static, width = 10, height = 8, units = "in", dpi = 300)
+
+
+
+```
+
+
+
+```{r}
+
+
+# Create interactive plots without geom_text2
+p_tree <- tree +
+    geom_point(data = metat, aes(x = x, y = y, color = group_location, text = label), size = 2) +
+    geom_treescale(x = 0, y = -2, width = 0.03, fontsize = 3, linesize = 1, offset = 1) +
+    theme(legend.position = "right")
+
+
+# Convert to interactive plots
+interactive_plot <- ggplotly(p_tree, tooltip = "text")
+
+
+# Display interactive plots
+interactive_plot
+
+```
+
+
+
+Tree topology is the same regardless of gap filtering method, so we will use the unfiltered dataset for our final tree to minimize data loss.
+
+
+### 9. Species Delimitation
+We will determine species delimitation of P. cristatus using ASAP and PTP. We will compare species delimitation results based on CO1 barcode data and overlay results onto the species tree generated from the concatenated data set (CO1 + CYTB + H3). We will exclude the known outgroups in these analyses (A_gigantea, BCBC-0012_FL_nomorph, BCQ-022_NZ_nomorph). Including distantly related groups risks extreme pairwise distances in ASAP and long branches attraction in mPTP which will obscure species delimitation in the focal group.
+
+
+#### ASAP
+
+We will first use the Assemble Species by Automatic Partitioning (ASAP) method for species delimitation. We will use the ASAP web version (Puillandre et al. 2021; https://bioinfo.mnhn.fr/abi/public/asap/)) to discover the existence of DNA barcode gaps and estimate the number of molecular OTUs. We will run this program with the K2P model and default settings which assess distance thresholds from 0.005 to 0.05.
+
+Note that we use gene datasets as input and must manually exclude outgroup sequences as needed. **This is why we generated CO1 datasets without outgroups in the steps above.** This is unlike mPTP in which we can specify which sequences to exclude (see below).
+
+First, download the input files.
+
+
+```bash
+
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_no_outgroups/CO1_no_outgroups.fa "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIES_DELIMITATION/asap/CO1_no_outgroups"
+
+```
+
+
+Then, run the ASAP program here: https://bioinfo.mnhn.fr/abi/public/asap/.
+
+Save the output to your project folder.
+
+
+
+#### PTP & mPTP
+We will perform a PTP and mPTP analysis (Zhang et al 2013) for species delimitation P. cristatus, following the default settings. PTP and mPTP assume a single evolutionary rate and variable evolutionary rate, respectively.
+
+Because PTP is a likelihood-based method that uses a rooted phylogenetic tree to infer species boundaries, rather than just genetic distances, we need a tree for input. We can specify which branches are outgroups to exclude.
+
+We will run PTP through the webserver <https://species.h-its.org/ptp/>.
+
+We will run mPTP through commandline.  We also find the minimum branch length before running the program.
+
+
+```bash
+
+ssh bcummings@10.251.34.23
+
+conda activate /bwdata3/bcummings/conda/ptp
+
+# mPTP
+# Find mininum branch length first
+/bwdata3/bcummings/conda/ptp/mptp/bin/mptp --minbr_auto /bwdata3/bcummings/PODOCERUS/04-PARTITION/output/none_CO1/CO1.fa --tree_file /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CO1/nogapfiltering_CO1.contree --output_file CO1_minbr
+
+mkdir -p /bwdata3/bcummings/PODOCERUS/06-SPECIESDELIMITATION/mptp/CO1_no_outgroup
+cd /bwdata3/bcummings/PODOCERUS/06-SPECIESDELIMITATION/mptp/CO1_no_outgroup
+/bwdata3/bcummings/conda/ptp/mptp/bin/mptp --ml --multi --minbr 0.0031956788 --tree_file /bwdata3/bcummings/PODOCERUS/05-SPECIESTREE/IQTREE/none_CO1/nogapfiltering_CO1.contree --output_file CO1_no_outgroup --outgroup A_gigantea,BCBC-0012_FL_nomorph,BCQ-022_NZ_nomorph --outgroup_crop
+
+
+```
+
+
+Download the results to your local project folder.
+
+
+
+```bash
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/06-SPECIESDELIMITATION/mptp/CO1_no_outgroup/* "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIES_DELIMITATION/ptp/CO1"
+
+scp bcummings@10.251.34.216:/bwdata3/bcummings/PODOCERUS/06-SPECIESDELIMITATION/mptp/CO1_no_outgroup/* "project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIES_DELIMITATION/mptp/CO1"
+
+```
+
+#### Plot tree 
+
+Now, plot the original tree with species delimitation groups.
+
+```{r}
+library(ggtree) # for plotting tree
+library(phangorn) # for midpoint root of tree
+
+vshv.tree <- read.tree("project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3/nogapfiltering.contree")
+meta <- read.table("project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3/metadata.csv", sep=',', header=T)
+vshv.tree <- midpoint(vshv.tree)
+
+
+vshv.tree <- read.iqtree("project_directory/Podocerus/Data/DNA/PCRIS/02_Phylogenetics/SPECIESTREE/CO1_CYTB_H3/nogapfiltering.contree")
+vshv.tree@phylo <- midpoint(vshv.tree@phylo)
+
+
+# Just tree
+plot(vshv.tree@phylo)
+```
+
+```{r}
+# Lets add tip point
+
+t1 <- ggtree(vshv.tree@phylo) %<+% meta +
+  geom_tippoint(aes(color = group_color))
+
+t1
+```
+
+```{r}
+library(ggtree) #for heat-map
+library(ggnewscale) #for new color/fill scale
+library(viridis) #using special color scale
+
+# Lets add heat-map specific dataframe
+
+meta.location <- as.data.frame(meta[,'group_location_abbrev'])
+
+colnames(meta.location) <- 'group_location_abbrev'
+rownames(meta.location) <- meta$id
+
+
+meta.species <- as.data.frame(meta[,'group_color'])
+colnames(meta.species) <- 'group_color'
+rownames(meta.species) <- meta$id
+```
+
+# Straight phylogeny
+```{r}
+# ---------------------------------------------------
+# Straight phylogeny: white background, rectangular
+# ---------------------------------------------------
+
+library(ggtree)
+library(treeio)
+library(ggplot2)
+library(dplyr)
+library(phangorn)
+
+# ---------------------------------------------------
+# Convert tree to plain phylo if needed
+# ---------------------------------------------------
+
+tree_phylo <- vshv.tree
+
+if ("treedata" %in% class(vshv.tree)) {
+  tree_phylo <- vshv.tree@phylo
+}
+
+# ---------------------------------------------------
+# Prepare metadata
+# ---------------------------------------------------
+
+meta_plot <- meta
+
+# remove any duplicate/old label columns
+meta_plot <- meta_plot[, !names(meta_plot) %in% "label"]
+
+meta_plot$plot_label <- ifelse(
+  meta_plot$species_group == "PCF",
+  "",
+  meta_plot$species_group
+)
+
+meta_plot$group_location_abbrev <- factor(
+  meta_plot$group_location_abbrev,
+  levels = c("OG", "BC", "WA", "OR", "CA", "FL", "NZ")
+)
+
+meta.location <- data.frame(
+  group_location_abbrev = meta_plot$group_location_abbrev
+)
+rownames(meta.location) <- meta_plot$id
+
+# ---------------------------------------------------
+# Base tree
+# ---------------------------------------------------
+
+t1 <- ggtree(tree_phylo, layout = "rectangular")
+
+# manually join metadata to tree data by tip label = metadata id
+t1$data <- t1$data %>%
+  left_join(meta_plot, by = c("label" = "id"))
+
+# ---------------------------------------------------
+# Bootstrap labels
+# ---------------------------------------------------
+
+t1$data$bootstrap_label <- NA_character_
+
+node_support <- suppressWarnings(as.numeric(t1$data$label))
+
+weak_nodes <- !t1$data$isTip &
+  !is.na(node_support) &
+  node_support < 90 &
+  t1$data$x < max(t1$data$x, na.rm = TRUE) * 0.6
+
+weak_nodes[is.na(weak_nodes)] <- FALSE
+
+t1$data$bootstrap_label[weak_nodes] <- as.character(round(node_support[weak_nodes]))
+
+t1 <- t1 +
+  geom_text2(
+    aes(label = bootstrap_label, subset = !is.na(bootstrap_label)),
+    size = 4.5,
+    color = "black",
+    hjust = -0.3
+  )
+
+# ---------------------------------------------------
+# Location heatmap bar
+# ---------------------------------------------------
+
+t2 <- gheatmap(
+  t1,
+  meta.location,
+  width = 0.14,
+  offset = 0.005,
+  colnames = FALSE,
+  color = "grey85"
+) +
+  scale_fill_manual(
+    name = "Location",
+    values = c(
+      "OG" = "#666666",
+      "BC" = "#08306B",
+      "WA" = "#2171B5",
+      "OR" = "#6BAED6",
+      "CA" = "#C6DBEF",
+      "FL" = "#E66101",
+      "NZ" = "#5E3C99"
+    ),
+    breaks = c("OG", "BC", "WA", "OR", "CA", "FL", "NZ")
+  )
+
+# ---------------------------------------------------
+# Tip point and label data
+# ---------------------------------------------------
+
+tip_data <- t1$data %>%
+  filter(isTip)
+
+# ---------------------------------------------------
+# Final plot
+# ---------------------------------------------------
+
+t2_final <- t2 +
+  geom_point(
+    data = tip_data,
+    aes(x = x, y = y, color = group_color),
+    size = 3,
+    inherit.aes = FALSE
+  ) +
+  scale_color_manual(
+    name = "Phenotype",
+    values = c(
+      "None" = "grey50",
+      "Other" = "#B22222",
+      "Purple" = "#8A2BE2",
+      "Red fluorescent" = "#FF0000",
+      "White-orange" = "#FF8C00"
+    )
+  ) +
+  geom_text(
+    data = tip_data %>% filter(plot_label != ""),
+    aes(x = x + 0.015, y = y, label = plot_label),
+    hjust = 0,
+    size = 4,
+    color = "black",
+    inherit.aes = FALSE
+  ) +
+  geom_treescale(
+    x = -0.01,
+    y = -2,
+    width = 0.05,
+    fontsize = 5
+  ) +
+  theme(
+    legend.position = c(0.05, 0.95),
+    legend.justification = c(0, 1),
+    legend.box = "vertical",
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.background = element_blank(),
+    legend.key = element_blank()
+  )
+
+# ---------------------------------------------------
+# Save figure
+# ---------------------------------------------------
+
+ggsave(
+  "project_directory/Podocerus/Data/images/phylogeny.png",
+  t2_final,
+  width = 9,
+  height = 11,
+  dpi = 600,
+  bg = "white"
+)
+```
+
+# Circular phylogeny
+```{r}
+# ---------------------------------------------------
+# Libraries
+# ---------------------------------------------------
+
+library(ggtree)
+library(treeio)
+library(ggnewscale)
+library(viridis)
+library(viridisLite)
+library(phangorn)
+
+# ---------------------------------------------------
+# Set location factor order (OG first)
+# ---------------------------------------------------
+
+meta$group_location_abbrev <- factor(
+  meta$group_location_abbrev,
+  levels = c("OG","BC","WA","OR","CA","FL","NZ")
+)
+
+meta.location <- as.data.frame(meta[,"group_location_abbrev"])
+colnames(meta.location) <- "group_location_abbrev"
+rownames(meta.location) <- meta$id
+
+# ---------------------------------------------------
+# Base circular tree
+# ---------------------------------------------------
+
+t1 <- ggtree(vshv.tree, layout = "circular") %<+% meta +
+  geom_tippoint(aes(color = group_color), size = 2.5) +
+  scale_color_manual(
+    name = "Phenotype",
+    values = c(
+      "None" = "grey50",
+      "Other" = "#B22222",
+      "Purple" = "#8A2BE2",
+      "Red fluorescent" = "#FF0000",
+      "White-orange" = "#FF8C00"
+    )
+  )
+
+# ---------------------------------------------------
+# Bootstrap classification
+# ---------------------------------------------------
+
+t1$data$bootstrap_label <- NA
+
+weak_nodes <- with(
+  t1$data,
+  !isTip &
+  !is.na(SH_aLRT) &
+  !is.na(UFboot) &
+  (SH_aLRT < 90 | UFboot < 90) &
+  x < max(x) * 0.6
+)
+
+t1$data$bootstrap_label[weak_nodes] <- round(t1$data$UFboot[weak_nodes])
+
+# ---------------------------------------------------
+# Plot bootstrap numbers
+# ---------------------------------------------------
+
+t1 <- t1 +
+  geom_text2(
+    aes(label = bootstrap_label,
+        subset = !is.na(bootstrap_label)),
+    size = 3,
+    color = "black",
+    nudge_x = 0.03
+  )
+
+# ---------------------------------------------------
+# Location heatmap ring
+# ---------------------------------------------------
+
+t2 <- gheatmap(
+  t1,
+  meta.location,
+  width = 0.08,
+  offset = 0.075,
+  colnames = FALSE,
+  color = "grey90"
+) +
+scale_fill_manual(
+  name = "Location",
+  values = c(
+    "BC" = "#08306B",
+    "WA" = "#2171B5",
+    "OR" = "#6BAED6",
+    "CA" = "#C6DBEF",
+    "FL" = "#E66101",
+    "NZ" = "#5E3C99",
+    "OG" = "#666666"
+  ),
+  breaks = c("OG","BC","WA","OR","CA","FL","NZ")
+)
+
+# ---------------------------------------------------
+# Tip labels
+# ---------------------------------------------------
+
+t2_final <- t2 +
+  geom_tiplab2(
+    aes(label = species_group),
+    size = 2.8,
+    color = "black",
+    offset = 0.02
+  ) +
+  theme(
+    legend.text = ggplot2::element_text(size = 12),
+    legend.title = ggplot2::element_text(size = 14)
+  )
+
+t2_final <- t2_final +
+
+  # scale bar line
+  geom_segment(
+    aes(
+      x = max(t1$data$x) * 1.17 - 0.45,
+      xend = max(t1$data$x) * 1.17 - 0.4,
+      y = -1.25,
+      yend = -1.1
+    ),
+    linewidth = 0.8
+  ) +
+
+  # scale text
+    geom_text(
+      aes(
+        x = max(t1$data$x) * 1.17 -0.425,
+        y = -3.5,
+        label = "0.05"
+      ),
+      size = 4,
+      angle = 5
+    )
+
+# ---------------------------------------------------
+# Save figure
+# ---------------------------------------------------
+
+ggsave(
+  "project_directory/Podocerus/Data/images/phylogeny_circular.png",
+  t2_final,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+```
+
+
+# Circular phylogeny on black
+```{r}
+# ---------------------------------------------------
+# Libraries
+# ---------------------------------------------------
+
+library(ggtree)
+library(treeio)
+library(ggnewscale)
+library(viridis)
+library(viridisLite)
+library(phangorn)
+
+# ---------------------------------------------------
+# Set location factor order (OG first)
+# ---------------------------------------------------
+
+meta$group_location_abbrev <- factor(
+  meta$group_location_abbrev,
+  levels = c("OG","BC","WA","OR","CA","FL","NZ")
+)
+
+meta.location <- as.data.frame(meta[,"group_location_abbrev"])
+colnames(meta.location) <- "group_location_abbrev"
+rownames(meta.location) <- meta$id
+
+# ---------------------------------------------------
+# Base circular tree
+# ---------------------------------------------------
+
+t1 <- ggtree(vshv.tree, layout = "circular", color = "#FAFAFA", size = 0.6) %<+% meta +
+  geom_tippoint(aes(color = group_color), size = 2.5) +
+  scale_color_manual(
+    name = "Phenotype",
+    values = c(
+      "None" = "grey70",
+      "Other" = "#FAFAFA",
+      "Purple" = "#8A2BE2",
+      "Red fluorescent" = "#FF0000",
+      "White-orange" = "#FF8C00"
+    )
+  )
+
+# ---------------------------------------------------
+# Bootstrap classification
+# ---------------------------------------------------
+
+t1$data$bootstrap_label <- NA
+
+weak_nodes <- with(
+  t1$data,
+  !isTip &
+  !is.na(SH_aLRT) &
+  !is.na(UFboot) &
+  (SH_aLRT < 90 | UFboot < 90) &
+  x < max(x) * 0.6
+)
+
+t1$data$bootstrap_label[weak_nodes] <- round(t1$data$UFboot[weak_nodes])
+
+# ---------------------------------------------------
+# Plot bootstrap numbers
+# ---------------------------------------------------
+
+t1 <- t1 +
+  geom_text2(
+    aes(label = bootstrap_label,
+        subset = !is.na(bootstrap_label)),
+    size = 3,
+    color = "#FAFAFA",
+    nudge_x = 0.03
+  )
+
+# ---------------------------------------------------
+# Location heatmap ring
+# ---------------------------------------------------
+
+t2 <- gheatmap(
+  t1,
+  meta.location,
+  width = 0.08,
+  offset = 0.075,
+  colnames = FALSE,
+  color = "grey90"
+) +
+scale_fill_manual(
+  name = "Location",
+  values = c(
+    "BC" = "#08306B",
+    "WA" = "#2171B5",
+    "OR" = "#6BAED6",
+    "CA" = "#C6DBEF",
+    "FL" = "darkgreen",
+    "NZ" = "#E66101",
+    "OG" = "#666666"
+  ),
+  breaks = c("OG","BC","WA","OR","CA","FL","NZ")
+)
+
+# ---------------------------------------------------
+# Tip labels
+# ---------------------------------------------------
+
+t2_final <- t2 +
+  geom_tiplab2(
+    aes(label = species_group),
+    size = 2.8,
+    color = "#FAFAFA",
+    offset = 0.02
+  ) +
+  theme(
+    legend.text = ggplot2::element_text(size = 12),
+    legend.title = ggplot2::element_text(size = 14)
+  )
+
+t2_final <- t2_final +
+
+  # scale bar line
+  geom_segment(
+    aes(
+      x = max(t1$data$x) * 1.17 - 0.45,
+      xend = max(t1$data$x) * 1.17 - 0.4,
+      y = -1.25,
+      yend = -1.1
+    ),
+    linewidth = 0.8,
+    color = "#FAFAFA"
+  ) +
+
+  # scale text
+    geom_text(
+      aes(
+        x = max(t1$data$x) * 1.17 -0.425,
+        y = -3.5,
+        label = "0.05"
+      ),
+      size = 4,
+      angle = 5,
+      color = "#FAFAFA"
+    )
+
+t2_final <- t2_final +
+  theme(
+    panel.background = element_rect(fill = "black", color = NA),
+    plot.background = element_rect(fill = "black", color = NA),
+    panel.border = element_blank(),
+    legend.background = element_rect(fill = "black"),
+    legend.key = element_rect(fill = "black"),
+    legend.text = element_text(color = "#FAFAFA", size = 12),
+    legend.title = element_text(color = "#FAFAFA", size = 14),
+    text = element_text(color = "#FAFAFA")
+  )
+
+# ---------------------------------------------------
+# Save figure
+# ---------------------------------------------------
+
+ggsave(
+  "project_directory/Podocerus/Data/images/phylogeny_circular_black.png",
+  t2_final,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+```
+
+# Circular phylogeny on black with no tip shapes
+```{r}
+# ---------------------------------------------------
+# Libraries
+# ---------------------------------------------------
+
+library(ggtree)
+library(treeio)
+library(ggnewscale)
+library(viridis)
+library(viridisLite)
+library(phangorn)
+
+# ---------------------------------------------------
+# Set location factor order (OG first)
+# ---------------------------------------------------
+
+meta$group_location_abbrev <- factor(
+  meta$group_location_abbrev,
+  levels = c("OG","BC","WA","OR","CA","FL","NZ")
+)
+
+meta.location <- as.data.frame(meta[,"group_location_abbrev"])
+colnames(meta.location) <- "group_location_abbrev"
+rownames(meta.location) <- meta$id
+
+# ---------------------------------------------------
+# Base circular tree
+# ---------------------------------------------------
+
+t1 <- ggtree(vshv.tree, layout = "circular", color = "#FAFAFA", size = 0.6) %<+% meta +
+  geom_tippoint(aes(color = group_color), size = 0) +
+  scale_color_manual(
+    name = "Phenotype",
+    values = c(
+      "None" = "grey70",
+      "Other" = "#FAFAFA",
+      "Purple" = "#8A2BE2",
+      "Red fluorescent" = "#FF0000",
+      "White-orange" = "#FF8C00"
+    )
+  )
+
+# ---------------------------------------------------
+# Bootstrap classification
+# ---------------------------------------------------
+
+t1$data$bootstrap_label <- NA
+
+weak_nodes <- with(
+  t1$data,
+  !isTip &
+  !is.na(SH_aLRT) &
+  !is.na(UFboot) &
+  (SH_aLRT < 90 | UFboot < 90) &
+  x < max(x) * 0.6
+)
+
+t1$data$bootstrap_label[weak_nodes] <- round(t1$data$UFboot[weak_nodes])
+
+# ---------------------------------------------------
+# Plot bootstrap numbers
+# ---------------------------------------------------
+
+t1 <- t1 +
+  geom_text2(
+    aes(label = bootstrap_label,
+        subset = !is.na(bootstrap_label)),
+    size = 3,
+    color = "#FAFAFA",
+    nudge_x = 0.03
+  )
+
+# ---------------------------------------------------
+# Location heatmap ring
+# ---------------------------------------------------
+
+t2 <- gheatmap(
+  t1,
+  meta.location,
+  width = 0.08,
+  offset = 0.075,
+  colnames = FALSE,
+  color = "grey90"
+) +
+scale_fill_manual(
+  name = "Location",
+  values = c(
+    "BC" = "#08306B",
+    "WA" = "#2171B5",
+    "OR" = "#6BAED6",
+    "CA" = "#C6DBEF",
+    "FL" = "darkgreen",
+    "NZ" = "#E66101",
+    "OG" = "#666666"
+  ),
+  breaks = c("OG","BC","WA","OR","CA","FL","NZ")
+)
+
+# ---------------------------------------------------
+# Tip labels
+# ---------------------------------------------------
+
+t2_final <- t2 +
+  geom_tiplab2(
+    aes(label = species_group),
+    size = 2.8,
+    color = "#FAFAFA",
+    offset = 0.02
+  ) +
+  theme(
+    legend.text = ggplot2::element_text(size = 12),
+    legend.title = ggplot2::element_text(size = 14)
+  )
+
+t2_final <- t2_final +
+
+  # scale bar line
+  geom_segment(
+    aes(
+      x = max(t1$data$x) * 1.17 - 0.45,
+      xend = max(t1$data$x) * 1.17 - 0.4,
+      y = -1.25,
+      yend = -1.1
+    ),
+    linewidth = 0.8,
+    color = "#FAFAFA"
+  ) +
+
+  # scale text
+    geom_text(
+      aes(
+        x = max(t1$data$x) * 1.17 -0.425,
+        y = -3.5,
+        label = "0.05"
+      ),
+      size = 4,
+      angle = 5,
+      color = "#FAFAFA"
+    )
+
+t2_final <- t2_final +
+  theme(
+    panel.background = element_rect(fill = "black", color = NA),
+    plot.background = element_rect(fill = "black", color = NA),
+    panel.border = element_blank(),
+    legend.background = element_rect(fill = "black"),
+    legend.key = element_rect(fill = "black"),
+    legend.text = element_text(color = "#FAFAFA", size = 12),
+    legend.title = element_text(color = "#FAFAFA", size = 14),
+    text = element_text(color = "#FAFAFA")
+  )
+
+# ---------------------------------------------------
+# Save figure
+# ---------------------------------------------------
+
+ggsave(
+  "project_directory/Podocerus/Data/images/phylogeny_circular_black_notipshapes.png",
+  t2_final,
+  width = 8,
+  height = 8,
+  dpi = 600
+)
+```

@@ -1,0 +1,1872 @@
+---
+title: "Pattern Extraction of Podocerus aff. cristatus"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+---
+
+```{r, message=FALSE, warning=FALSE}
+
+#devtools::install_github("https://github.com/J0vid/Colormesh")
+#remotes::install_github("J0vid/Jovid")
+#install.packages("imager")
+#install.packages("adegenet")
+#install.packages("mclust")
+#install.packages("Morpho")
+#install.packages("shapes")
+library(adegenet)
+library(Colormesh)
+library(imager)
+library(geomorph)
+library(abind)
+library(Morpho)
+library(shapes)
+library(ade4)
+library(adegraphics)
+library(boot)
+library(MASS)
+
+# Installing recolorize & other packages used in these examples
+#install.packages("devtools")
+#install.packages("raster")
+
+library(devtools)
+library(raster)
+
+# install development version of recolorize and patternize:
+#devtools::install_github("hiweller/recolorize")
+#devtools::install_github("StevenVB12/patternize")
+
+library(recolorize)
+library(patternize)
+
+# install CRAN version of pavo:
+#install.packages("pavo")
+library(pavo)
+
+
+library(Colormesh)
+library(geomorph)
+library(imager)
+library(readxl)
+library(dplyr)
+
+```
+
+#-------------- IMAGE PREPARATION -----------------
+
+## Overview
+
+Export PNG images from ImageJ using the Batch_Recolorize_Prep_POD tool. We are using the dorsal body images exported with the Presentation Image tool - i.e., images compatible with human vision because we are not attempting to model predator vision. The dorsal body outline for clustering should include pereonites 1-7 and the coxa (we will only be using the pereonites minus the coxa, i.e., the most visible region, for the models later on to keep things simple for overlaying).
+Make .tps file using tpsUtil32. Select "Build tps file from images" from drop-down menu. Click "Input" and select the image directory. Click "Output" and select where you want the output .tps file.
+
+Set landmarks for dorsal bodies in tpsDig2. First, go to File - Input source - File... and select your .tps file. Go to "Image Tools" and click the "Measure" tab. Click "Set Scale" and draw a line along a 1 mm portion of the scale bar in the image, then click OK. Use the "Digitize Landmarks" tool and, starting with the first point on the posterior end and going counterclockwise, place 6 points on each segment edge, and one point at the anterior most point, and repeat on the other side for a total of 14 points. THEN, place 1 point in between each of these points, plus additional points at either side of the anterior most point and at the "wing tips" of the first segment. This will give you a total of 30 points along the perimeter of the subject. Proceed to next image. Make sure to save and overwrite .tps file every so often as you go through the images.
+
+We will need to change the .tps file to match the format needed by Colormesh because we used the outline tool to create the landmarks. Specifically, for each image entry in the file, we need to change "LM=0" to "LM=30" and remove the "OUTLINES" and "POINTS" lines. Run the following chunk to do this.
+
+## Load data
+```{r}
+# Path to your input .tps file
+input_tps_F <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/orig_F.tps"
+
+input_tps_M <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/orig_M.tps"
+
+# Path to save the modified version
+output_tps_F <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/orig_F_fixed.tps"
+
+output_tps_M <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/orig_M_fixed.tps"
+
+# Read all lines from the file
+lines_F <- readLines(input_tps_F)
+lines_M <- readLines(input_tps_M)
+
+# 1. Replace LM=0 with LM=30
+lines_F <- gsub("^LM=0$", "LM=30", lines_F)
+lines_M <- gsub("^LM=0$", "LM=30", lines_M)
+
+# 2. Remove lines starting with OUTLINES or POINTS
+lines_F <- lines_F[!grepl("^(OUTLINES|POINTS)", lines_F)]
+lines_M <- lines_M[!grepl("^(OUTLINES|POINTS)", lines_M)]
+
+# Write the modified lines to a new file
+writeLines(lines_F, output_tps_F)
+writeLines(lines_M, output_tps_M)
+
+cat("Modified TPS file saved to:", output_tps_F, "\n")
+cat("Modified TPS file saved to:", output_tps_M, "\n")
+
+```
+
+```{r}
+## For clarity, we added .ext in the example code below to identify these data as coordinates that were imported into the Colormesh environment.  
+specimen.LM.ext.F <-  tps2array("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/orig_F_fixed.tps")
+
+specimen.LM.ext.M <-  tps2array("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/orig_M_fixed.tps")
+
+
+```
+
+## Define perimeter map and landmarks
+
+Define perimeter map and sliding landmarks (i.e. semilandmarks). Landmarks mark points (main.lms) are points should remain the same between images, while semilandmarks are flexible and expected to change with the image.
+```{r}
+## Define perimeter map (order the points occur around the perimeter) 
+perimeter.map <- c(
+  1, 15, 2, 16, 3, 17, 4, 18, 5, 19, 6, 20, 7, 21, 22, 8, 23, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30
+)
+
+## Because of the wavy nature of our perimeter, all perimeter points are semilandmarks except the posterior-most and anterior-most points (1 and 17). We also have 6 additional interior anchor points (1:6)
+main.lms <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ,13, 14)
+
+## Define sliders (main.lms = identifies which of all 38 landmarks are the traditional landmarks and therefore will NOT slide, vs semilandmarks that slide)
+sliders <- make.sliders(perimeter.map, main.lms = main.lms)
+```
+
+## Find overall consensus shape
+
+To avoid biasing pod shape toward a particular sex since the numbers of sexes sampled varied, an overall-consensus shape will be generated using the 2 sex-specific consensus shapes as inputs.  Individual images will then be transformed to the overall-consensus shape and saved as PNG image files, thus providing the consensus-shaped image set required for the Colormesh sampling pipeline.
+```{r}
+# Generalized Procrustes Analysis for each sex
+gpa_F <- gpagen(specimen.LM.ext.F, curves = sliders)  # 'curves' for semilandmarks
+gpa_M <- gpagen(specimen.LM.ext.M, curves = sliders)
+
+# Extract consensus shapes
+consensus_F <- mshape(gpa_F$coords)
+consensus_M <- mshape(gpa_M$coords)
+
+# Create an overall consensus shape
+# Stack both consensuses into one array
+consensus_array <- array(NA, dim = c(dim(consensus_F)[1], dim(consensus_F)[2], 2))
+consensus_array[, , 1] <- consensus_F
+consensus_array[, , 2] <- consensus_M
+
+# GPA to get the overall consensus
+overall_gpa <- gpagen(consensus_array)
+overall_consensus <- mshape(overall_gpa$coords)
+
+#We combine the two consensus configurations into a 3D array and run GPA again:
+# Stack both consensuses into one array
+consensus_array <- array(NA, dim = c(dim(consensus_F)[1], dim(consensus_F)[2], 2))
+consensus_array[, , 1] <- consensus_F
+consensus_array[, , 2] <- consensus_M
+
+```
+
+
+## Unwarp
+```{r}
+# Packages
+library(geomorph)
+library(Colormesh)
+
+# ---- Your semilandmark setup (you already have this) ----
+perimeter.map <- c(1, 15, 2, 16, 3, 17, 4, 18, 5, 19, 6, 20, 7, 21, 22, 8, 23, 24,
+                   9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30)
+main_lms <- 1:14
+sliders <- Colormesh::make.sliders(perimeter.map, main.lms = main_lms)
+
+# ---- Landmarks from your TPS files (done already) ----
+lm_F <- specimen.LM.ext.F  #  p x 2 x nF
+lm_M <- specimen.LM.ext.M  #  p x 2 x nM
+
+# ---- Where the ORIGINAL images live (same pixel dimensions within each set) ----
+imgdir_F <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/images/F/" # ends with /
+imgdir_M <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/images/M/"   # ends with /
+
+# Image basenames WITHOUT extensions (must match the images in those folders)
+image_names_F <- tools::file_path_sans_ext(list.files(imgdir_F, pattern = "\\.(tif|tiff|png|jpg)$", ignore.case = TRUE))
+image_names_M <- tools::file_path_sans_ext(list.files(imgdir_M, pattern = "\\.(tif|tiff|png|jpg)$", ignore.case = TRUE))
+
+stopifnot(length(image_names_F) == dim(lm_F)[3])
+stopifnot(length(image_names_M) == dim(lm_M)[3])
+
+# ---- 1) Unwarp EACH sex to its own mean; capture sex-specific consensuses ----
+out_F_sex <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/unwarped/F_sex_mean/"   # end with /
+out_M_sex <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/unwarped/M_sex_mean/"
+
+res_F <- Colormesh::tps.unwarp(
+  imagedir   = imgdir_F,
+  landmarks  = lm_F,
+  image.names = image_names_F,
+  sliders    = sliders,
+  write.dir  = out_F_sex
+)
+cons_F <- res_F$target  # p x 2
+
+res_M <- Colormesh::tps.unwarp(
+  imagedir   = imgdir_M,
+  landmarks  = lm_M,
+  image.names = image_names_M,
+  sliders    = sliders,
+  write.dir  = out_M_sex
+)
+cons_M <- res_M$target  # p x 2
+
+# 2) Compute sex consensuses in Procrustes space (not from tps.unwarp)
+gpa_F <- geomorph::gpagen(specimen.LM.ext.F, curves = sliders, print.progress = FALSE)
+gpa_M <- geomorph::gpagen(specimen.LM.ext.M, curves = sliders, print.progress = FALSE)
+
+cons_F_gpa <- geomorph::mshape(gpa_F$coords)  # centroid-size 1
+cons_M_gpa <- geomorph::mshape(gpa_M$coords)
+
+cons_array <- array(NA_real_, dim = c(nrow(cons_F_gpa), 2, 2))
+cons_array[, , 1] <- cons_F_gpa
+cons_array[, , 2] <- cons_M_gpa
+
+# ADDED: Perform GPA on the combined array to align the two consensuses
+overall_gpa <- geomorph::gpagen(cons_array, curves = sliders, print.progress = FALSE)  # Include curves for semilandmark sliding; print.progress optional
+
+overall_consensus <- geomorph::mshape(overall_gpa$coords)    # Now properly aligned in Procrustes units
+
+# 3) Scale target to pixel units once, reuse for F and M
+s <- mean(c(gpa_F$Csize, gpa_M$Csize))
+target_px <- overall_consensus * s
+
+saveRDS(
+  target_px,
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/target_px_overall.rds"
+)
+
+# ---- 3) Unwarp ALL images again to the OVERALL consensus (target=...) ----
+out_F_all <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/unwarped_overall/F/"   # end with /
+out_M_all <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/unwarped_overall/M/"
+
+Colormesh::tps.unwarp(
+  imagedir    = imgdir_F,
+  landmarks   = lm_F,
+  image.names = image_names_F,
+  sliders     = sliders,
+  write.dir   = out_F_all,
+  target      = target_px
+)
+
+Colormesh::tps.unwarp(
+  imagedir    = imgdir_M,
+  landmarks   = lm_M,
+  image.names = image_names_M,
+  sliders     = sliders,
+  write.dir   = out_M_all,
+  target      = target_px
+)
+
+# (Optional) Save the overall consensus to TPS for record-keeping
+write_tps <- function(mat, file) {
+  con <- file(file, "wt"); on.exit(close(con), add = TRUE)
+  cat("LM=", nrow(mat), "\n", sep = "", file = con)
+  apply(mat, 1, function(r) cat(sprintf("%.6f %.6f\n", r[1], r[2]), file = con))
+  cat("ID=Consensus\n", file = con)
+}
+write_tps(overall_consensus, "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/overall_consensus.tps")
+
+```
+
+## Photoshop editing
+
+Now, use Photoshop to open these unwarped images, remove the backgrounds, and crop to the dorsal bodies. To do this: Go to File -- Automate -- Batch... and then select "unwarped to cropped" in the drop down menu with Crop Around ROI action. On the output, repeat this process using the Remove BG action. Then on this output, repeat the process using the Flip action.
+
+#-------------- RECOLORIZE/PATTERNIZE WORKFLOW -----------------
+
+## Load image data
+```{r, message=FALSE, warning=FALSE}
+
+img_dir <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/unwarped_overall_cropped_nobackground_rotated/"
+
+files <- list.files(
+  img_dir,
+  pattern = "\\_unwarped.png$",
+  full.names = TRUE
+)
+
+#Combined image list
+imgs <- lapply(files, png::readPNG)
+names(imgs) <- tools::file_path_sans_ext(basename(files))
+
+
+```
+
+
+## Generate universal color palette 
+We want to map each image to the same set of 3 (or however many) colors (in our case, all_color colors), but not all images have all colors present and they won't be in the same order even if they did. 
+
+SO, we’ll come up with our list of colors by combining color palettes across images, and then use the imposeColors() function in recolorize to map each of our images to the same color palette. 
+
+First, generate a color palette for each image using the recolorize2 wrapper function.
+```{r, message=FALSE, warning=FALSE}
+
+
+# make an empty list for storing the recolorize objects
+rc_list_rgb <- vector("list", length(imgs))
+
+for (i in seq_along(imgs)) {
+  rc_list_rgb[[i]] <- recolorize2(
+    imgs[[i]],
+    method = "histogram",
+    bins = 3,
+    cutoff = 0.3,
+    transparent = TRUE,
+    color_space = "sRGB",
+    recluster_color_space = "sRGB",
+    plotting = TRUE
+  )
+
+}
+
+## SAVE
+saveRDS(
+  rc_list_rgb,
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/recolorize_list_rgb_n3.rds"
+)
+```
+
+Drop the smallest color clusters whose cumulative sum (as a proportion of total pixels assigned) is lower than some threshold, like 10% of the image.
+```{r}
+rc_list_rgb_thres <- lapply(rc_list_rgb, thresholdRecolor, pct = 0.1)
+
+## SAVE
+saveRDS(
+  rc_list_rgb_thres,
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/recolorize_list_rgb_n3_thres.rds"
+)
+```
+
+Next, combine the color palettes from all of the recolorize objects in rc_list and use hclust_color to plot them and return a list of which colors to group together.
+```{r}
+rc_list_rgb_thres <- readRDS("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/recolorize_list_rgb_n3_thres.rds")
+
+# get a dataframe of all colors:
+all_palettes <- do.call(rbind, lapply(rc_list_rgb_thres, function(i) i$centers))
+
+# and for cluster sizes (as a proportion of their original image):
+all_sizes <- do.call(c, lapply(rc_list_rgb_thres, function(i) i$sizes))
+
+# plot colors using hclust and return grouping list:
+par(mar = rep(2, 4))
+cluster_list <- hclust_color(all_palettes, cutoff = 38)
+```
+
+
+Now, use that list to combine all the colors and come up with our universal palette:
+```{r}
+# make an empty matrix for storing the new palette
+pod_palette <- matrix(NA, ncol = 3, nrow = length(cluster_list))
+
+# for every color in cluster_list...
+for (i in 1:length(cluster_list)) {
+  
+  # get the center indices
+  idx <- cluster_list[[i]]
+  
+  # get the average value for each channel, using cluster size to get a weighted average
+  ctr <- apply(all_palettes, 2, 
+                 function(j) weighted.mean(j[idx], 
+                                           w = all_sizes[idx]))
+  
+  # store in the palette matrix
+  pod_palette[i, ] <- ctr
+}
+
+# check that our colors seem reasonable
+par(mar = rep(0, 4))
+plotColorPalette(pod_palette)
+
+```
+
+## Map universal color palette to images
+
+And now, we can use imposeColors() to map every image to the same set of colors:
+```{r}
+impose_list_rgb_thres <- lapply(imgs, function(i) imposeColors(i, pod_palette, 
+                                                     adjust_centers = FALSE, 
+                                                     plotting = FALSE))
+
+## SAVE
+saveRDS(
+  impose_list_rgb_thres,
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/impose_list_rgb_n3_thres_highercutoff.rds"
+)
+```
+
+Check out our palettes!
+```{r}
+impose_list_rgb_thres <- readRDS("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/impose_list_rgb_n3_thres_highercutoff.rds")
+
+layout(matrix(1:20, nrow = 4))
+par(mar = rep(0, 4))
+for (i in impose_list_rgb_thres) {
+  plotColorPalette(i$centers, i$sizes)
+}
+
+```
+
+## Run Patternize and use PCA to quantify multivariate color-pattern variation
+
+Convert list to patternize data.
+```{r}
+# convert to patternize:
+patternize_list <- lapply(impose_list_rgb_thres, recolorize_to_patternize)
+
+# downsample pixels to reduce sample sizes and noise
+patternize_list_small <- lapply(patternize_list, function(x) {
+  lapply(x, function(r) raster::aggregate(r, fact = 3))
+})
+
+raster::ncell(patternize_list_small[[1]])
+```
+
+Run PCA on patternize data.
+```{r}
+source("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/patPCA_total.R")
+pod_pca_rgb_thres_highercutoff <- patPCA_total(patternize_list_small, quietly = FALSE)
+
+
+# Save PCA
+saveRDS(pod_pca_rgb_thres_highercutoff, "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+```
+
+Visualize PCA results.
+```{r}
+pod_pca_rgb_thres <- readRDS("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+
+impose_list_rgb_thres <- readRDS("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/impose_list_rgb_n3_thres_highercutoff.rds")
+
+# first, make a blank plot
+PCx <- 1; PCy <- 2
+pca_summary <- summary(pod_pca_rgb_thres)
+limits <- apply(pod_pca_rgb_thres$x[ , c(PCx, PCy)], 2, range)
+par(mar = c(4, 4, 2, 1))
+plot(pod_pca_rgb_thres$x[ , c(PCx, PCy)], type = "n",
+     asp = 1,
+     xlim = limits[ , 1] + c(-5, 5), 
+     ylim = limits[ , 2] + c(-10, 10),
+     xlab=paste0('PC1 (', round(pca_summary$importance[2, PCx]*100, 1), ' %)'),
+     ylab=paste0('PC2 (', round(pca_summary$importance[2, PCy]*100, 1), ' %)'))
+
+# then add images:
+for (i in 1:length(impose_list_rgb_thres)) {
+  img <- impose_list_rgb_thres[[i]]$original_img
+  
+  rasterImage(
+    img,
+    xleft   = pod_pca_rgb_thres$x[i, PCx] - 10,
+    ybottom = pod_pca_rgb_thres$x[i, PCy] - 10,
+    xright  = pod_pca_rgb_thres$x[i, PCx] + 10,
+    ytop    = pod_pca_rgb_thres$x[i, PCy] + 10
+  )
+}
+
+# or use original images
+plot(pod_pca_rgb_thres$x[ , c(PCx, PCy)], type = "n",
+     asp = 1,
+     xlim = limits[ , 1] + c(-5, 5), 
+     ylim = limits[ , 2] + c(-10, 10),
+     xlab=paste0('PC1 (', round(pca_summary$importance[2, PCx]*100, 1), ' %)'),
+     ylab=paste0('PC2 (', round(pca_summary$importance[2, PCy]*100, 1), ' %)'))
+
+# read in images from the original folder:
+images <- lapply(dir("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/micatoolbox_images_for_visualizing/nobackground/combined/", full.names = TRUE),
+                 readImage)
+
+# and plot:
+for (i in 1:length(images)) {
+  img <- impose_list_rgb_thres[[i]]$original_img
+  
+  rasterImage(
+    img,
+    xleft   = pod_pca_rgb_thres$x[i, PCx] - 10,
+    ybottom = pod_pca_rgb_thres$x[i, PCy] - 10,
+    xright  = pod_pca_rgb_thres$x[i, PCx] + 10,
+    ytop    = pod_pca_rgb_thres$x[i, PCy] + 10
+  )
+}
+```
+
+Determine how many PCs to keep.
+```{r}
+pod_pca_rgb_thres <- readRDS("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+
+pca_summary <- summary(pod_pca_rgb_thres)
+
+# Proportion and cumulative variance
+prop_var <- pca_summary$importance[2, ]
+cum_var <- cumsum(prop_var)
+
+data.frame(
+  PC = seq_along(prop_var),
+  prop_var = prop_var,
+  cum_var = cum_var
+)
+
+
+cum_var <- cumsum(pca_summary$importance[2, ])
+nPC <- which(cum_var >= 0.90)[1]  # Keep PCs explaining 90% variance
+```
+
+
+#-------------- CLUSTER MULTIVARIATE PHENOTYPE DATA -----------------
+
+We will now cluster our phenotype data based on PCA scores. Hierarchical clustering is better suited than k-means when small but biologically meaningful clusters must be preserved.
+
+## Determine the number of clusters 
+```{r}
+pod_pca_rgb_thres <- readRDS("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/rds_files/pod_pca_rgb_n3_thres_highercutoff.rds")
+
+# Use retained PC scores only
+pc_scores <- pod_pca_rgb_thres$x[, seq_len(nPC)]
+
+d <- dist(pc_scores)
+hc <- hclust(d, method = "ward.D2")
+
+# Inspect merge heights to identify a natural cut
+plot(
+  sort(hc$height, decreasing = TRUE),
+  type = "b",
+  xlab = "Merge step",
+  ylab = "Height"
+)
+
+plot(hc, labels = FALSE, main = "Cluster Dendrogram")
+
+```
+
+## Perform hierarchical clustering and visualize in 2D PCA space
+```{r}
+
+## ---------------------------------------------------------
+## Plot clusters in PCA space
+## ---------------------------------------------------------
+
+# Use retained PC scores only
+pc_scores <- pod_pca_rgb_thres$x[, seq_len(nPC)]
+
+d  <- dist(pc_scores)
+hc <- hclust(d, method = "ward.D2")
+
+# Choose clusters based on dendrogram height
+cut_height <- 150
+clusters <- factor(cutree(hc, h = cut_height))
+
+# Force numeric order of levels (important safeguard)
+clusters <- factor(clusters, levels = sort(unique(clusters)))
+
+# Dendrogram
+plot(hc, labels = FALSE, main = "Cluster Dendrogram")
+abline(h = cut_height, col = "red", lty = 2, lwd = 2)
+
+
+## ---------------------------------------------------------
+## Data
+## ---------------------------------------------------------
+
+stopifnot(ncol(pc_scores) >= 3)
+
+PC <- as.data.frame(pc_scores[, 1:3, drop = FALSE])
+names(PC) <- c("PC1", "PC2", "PC3")
+
+ok <- complete.cases(PC)
+PC <- PC[ok, , drop = FALSE]
+clusters <- droplevels(clusters[ok])
+
+cluster_levels <- levels(clusters)
+
+
+## ---------------------------------------------------------
+## LOCK cluster → color mapping (DO THIS ONCE)
+## ---------------------------------------------------------
+
+palette_11 <- c(
+  "#661100","#6699CC","#E69F00","#009E73","#D55E00",
+  "#CC79A7","#882255","#F0E442","#000000","#88CCEE",
+  "#44AA99","#117733","#999933","#DDCC77","#CC6677",
+  "#FF0000","#AA4499","#332288","#0072B2","#888888"
+)
+
+cluster_colors <- setNames(
+  palette_11[seq_along(cluster_levels)],
+  cluster_levels
+)
+
+
+## ---------------------------------------------------------
+## Saving
+## ---------------------------------------------------------
+
+setwd("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results")
+
+do_png   <- TRUE
+png_file <- "patternize_clusters_2D_rgb_n3_thres_highercutoff.png"
+
+if (isTRUE(do_png)) {
+  png(png_file, width = 1800, height = 1600, res = 300, bg = "white")
+}
+
+
+## ---------------------------------------------------------
+## Plot
+## ---------------------------------------------------------
+
+op <- par(xpd = NA)
+par(mar = c(7, 5, 4, 2))
+
+plot(
+  pod_pca_rgb_thres$x[, c(PCx, PCy)],
+  col  = cluster_colors[as.character(clusters)],
+  pch  = 16,
+  xlab = paste0("PC", PCx),
+  ylab = paste0("PC", PCy)
+)
+
+# Convex hulls
+for (cl in cluster_levels) {
+
+  idx <- which(clusters == cl)
+  if (length(idx) < 3) next
+
+  h <- chull(
+    pod_pca_rgb_thres$x[idx, PCx],
+    pod_pca_rgb_thres$x[idx, PCy]
+  )
+
+  polygon(
+    pod_pca_rgb_thres$x[idx[h], PCx],
+    pod_pca_rgb_thres$x[idx[h], PCy],
+    col    = adjustcolor(cluster_colors[cl], alpha.f = 0.25),
+    border = cluster_colors[cl],
+    lwd    = 2
+  )
+}
+
+legend(
+  "bottom",
+  inset  = -0.4,
+  legend = cluster_levels,
+  col    = cluster_colors[cluster_levels],
+  pch    = 16,
+  horiz  = TRUE,
+  bty    = "n",
+  cex    = 0.9
+)
+
+par(op)
+
+if (isTRUE(do_png)) {
+  dev.off()
+  message("Saved: ", normalizePath(png_file))
+}
+
+
+```
+
+## Visualize in 3D PCA space too, for the heck of it
+```{r}
+## =========================================================
+## Static 3D PCA Plot with Consistent Cluster Colors
+## =========================================================
+
+library(scatterplot3d)
+
+stopifnot(ncol(pc_scores) >= 3)
+
+PC <- as.data.frame(pc_scores[, 1:3, drop = FALSE])
+names(PC) <- c("PC1", "PC2", "PC3")
+
+ok <- complete.cases(PC)
+PC <- PC[ok, , drop = FALSE]
+clusters <- droplevels(clusters[ok])
+
+cluster_levels <- levels(clusters)
+
+
+## ---------------------------------------------------------
+## Saving
+## ---------------------------------------------------------
+
+setwd("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results")
+
+do_png   <- TRUE
+png_file <- "patternize_clusters_3D_rgb_n3_thres_highercutoff.png"
+
+if (isTRUE(do_png)) {
+  png(png_file, width = 1800, height = 1600, res = 300, bg = "white")
+}
+
+
+## ---------------------------------------------------------
+## Plot
+## ---------------------------------------------------------
+
+pt_cols <- cluster_colors[as.character(clusters)]
+
+hull_alpha <- 0.22
+angle      <- 35
+pch_size   <- 0.8
+border_lwd <- 1
+
+s3d <- scatterplot3d(
+  PC$PC1, PC$PC2, PC$PC3,
+  color = pt_cols,
+  pch = 16,
+  cex.symbols = pch_size,
+  angle = angle,
+  xlab = "PC1",
+  ylab = "PC2",
+  zlab = "PC3",
+  box = FALSE
+)
+
+## ---- Project to 2D and draw hulls ----
+proj <- s3d$xyz.convert(PC$PC1, PC$PC2, PC$PC3)
+
+proj_df <- data.frame(
+  x   = proj$x,
+  y   = proj$y,
+  grp = clusters
+)
+
+for (g in cluster_levels) {
+
+  idx <- which(clusters == g)
+  if (!length(idx)) next
+
+  X <- unique(proj_df[idx, c("x", "y")])
+
+  if (nrow(X) >= 3) {
+
+    h <- chull(X$x, X$y)
+
+    polygon(
+      X$x[h], X$y[h],
+      col    = adjustcolor(cluster_colors[g], alpha.f = hull_alpha),
+      border = adjustcolor(cluster_colors[g], alpha.f = hull_alpha * 2),
+      lwd    = border_lwd
+    )
+  }
+}
+
+## ---- Replot points on top ----
+s3d$points3d(
+  PC$PC1, PC$PC2, PC$PC3,
+  col = pt_cols,
+  pch = 16,
+  cex = pch_size
+)
+
+## ---- Legend ----
+op <- par(xpd = NA)
+legend(
+  "top",
+  legend = cluster_levels,
+  col    = cluster_colors[cluster_levels],
+  pch    = 16,
+  horiz  = TRUE,
+  bty    = "n",
+  cex    = 0.9,
+  inset  = c(0, 0.1)
+)
+par(op)
+
+if (isTRUE(do_png)) {
+  dev.off()
+  message("Saved: ", normalizePath(png_file))
+}
+
+```
+
+## Visualize with original images
+```{r}
+library(png)
+
+add_raster_preserve_aspect <- function(img, x, y, half_w_x, half_h_y) {
+  rasterImage(
+    img,
+    xleft   = x - half_w_x,
+    xright  = x + half_w_x,
+    ybottom = y - half_h_y,
+    ytop    = y + half_h_y
+  )
+}
+
+img_dir <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/micatoolbox_images_for_visualizing/nobackground/combined/"
+
+img_files <- list.files(img_dir, pattern="\\.png$", full.names=TRUE)
+img_list  <- lapply(img_files, readPNG)
+
+out_file <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/patternize_PCA_two_panel.png"
+
+png(out_file, width=4500, height=2000, res=300, bg="white")
+
+par(
+  mfrow=c(1,2),
+  mar=c(5,5,2,1),
+  cex.lab=1.8,
+  cex.axis=1.3
+)
+
+##################################################
+# PANEL A — PC1 vs PC2 with specimens
+##################################################
+
+plot(
+  pod_pca_rgb_thres$x[,c(PCx,PCy)],
+  col=NA,
+  pch=NA,
+  xlim=limits[,1]+c(-5,5),
+  ylim=limits[,2]+c(-10,10),
+  xlab="PC1",
+  ylab="PC2"
+)
+
+points(
+  pod_pca_rgb_thres$x[,c(PCx,PCy)],
+  pch=16,
+  col=adjustcolor("grey50",0.6),
+  cex=1.4
+)
+
+usr <- par("usr")
+pin <- par("pin")
+
+img_frac <- 0.035
+
+half_w_x <- (usr[2]-usr[1]) * img_frac / 2
+
+img_aspect <- dim(img_list[[1]])[1] / dim(img_list[[1]])[2]
+
+inch_per_x <- pin[1]/(usr[2]-usr[1])
+inch_per_y <- pin[2]/(usr[4]-usr[3])
+
+width_in  <- 2*half_w_x*inch_per_x
+height_in <- width_in*img_aspect
+
+half_h_y <- (height_in/2)/inch_per_y
+
+##################################################
+# ensure rare morphs always included
+##################################################
+
+rare_clusters <- c("18","16")
+
+rare_idx <- which(clusters %in% rare_clusters)
+
+remaining_idx <- setdiff(seq_along(img_list), rare_idx)
+
+set.seed(1)
+
+N_show <- 180
+
+sample_idx <- sample(
+  remaining_idx,
+  N_show - length(rare_idx)
+)
+
+show_idx <- c(rare_idx, sample_idx)
+
+show_idx <- show_idx[
+  order(pod_pca_rgb_thres$x[show_idx,PCx])
+]
+
+normal_idx <- show_idx[!show_idx %in% rare_idx]
+rare_draw  <- show_idx[ show_idx %in% rare_idx]
+
+##################################################
+# draw normal specimens first
+##################################################
+
+for(i in normal_idx){
+
+  add_raster_preserve_aspect(
+    img_list[[i]],
+    pod_pca_rgb_thres$x[i,PCx],
+    pod_pca_rgb_thres$x[i,PCy],
+    half_w_x,
+    half_h_y
+  )
+
+}
+
+##################################################
+# draw rare morphs last
+##################################################
+
+for(i in rare_draw){
+
+  add_raster_preserve_aspect(
+    img_list[[i]],
+    pod_pca_rgb_thres$x[i,PCx],
+    pod_pca_rgb_thres$x[i,PCy],
+    half_w_x,
+    half_h_y
+  )
+
+}
+
+mtext("A", side=3, adj=-0.1, line=0.5, cex=2, font=2)
+
+##################################################
+# PANEL B — PC1 vs PC3
+##################################################
+
+plot(
+  pod_pca_rgb_thres$x[,c(PCx,3)],
+  pch=16,
+  col=adjustcolor("grey50",0.6),
+  cex=1.4,
+  xlab="PC1",
+  ylab="PC3"
+)
+
+points(
+  pod_pca_rgb_thres$x[clusters=="18",c(PCx,3)],
+  pch=16,
+  col="purple",
+  cex=1.4
+)
+
+points(
+  pod_pca_rgb_thres$x[clusters=="16",c(PCx,3)],
+  pch=16,
+  col="red",
+  cex=1.4
+)
+
+mtext("B", side=3, adj=-0.1, line=0.5, cex=2, font=2)
+
+dev.off()
+```
+
+
+## Quality control
+
+Have a look at which images are in which cluster and see if it makes sense.
+```{r}
+plot_cluster_grids <- function(impose_list_rgb_thres, clusters, ncol = 6) {
+  cl_levels <- levels(clusters)
+
+  for (cl in cl_levels) {
+    idx <- which(clusters == cl)
+
+    n <- length(idx)
+    nrow <- ceiling(n / ncol)
+
+    op <- par(mfrow = c(nrow, ncol), mar = rep(0.2, 4))
+    on.exit(par(op), add = TRUE)
+
+    for (i in idx) {
+      plotImageArray(recoloredImage(impose_list_rgb_thres[[i]]))
+    }
+
+    mtext(
+      paste("Cluster", cl, " (n =", n, ")"),
+      side = 3, line = -1, cex = 1.2
+    )
+  }
+}
+
+
+plot_cluster_grids(impose_list_rgb_thres, clusters)
+
+```
+
+## Export data
+```{r}
+## =========================================================
+## COPY ORIGINAL SATURATED IMAGES INTO CLUSTER FOLDERS
+## (handles '_unwarped' suffix in impose_list_rgb_thres names)
+## =========================================================
+
+# source directory with ORIGINAL SATURATED images
+src_dir <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/micatoolbox_images_for_visualizing/nobackground/combined"
+
+# destination base directory
+dest_base <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/clusters_rgb_n3_thres_highercutoff"
+
+# create base directory
+dir.create(dest_base, showWarnings = FALSE)
+
+# get original image files
+orig_files <- list.files(
+  src_dir,
+  pattern = "\\.(png|jpg|jpeg)$",
+  full.names = TRUE,
+  ignore.case = TRUE
+)
+
+orig_names <- tools::file_path_sans_ext(basename(orig_files))
+
+# specimen names from impose_list_rgb_thres
+specimen_names <- names(impose_list_rgb_thres)
+
+# ---- FIX: remove '_unwarped' suffix ----
+specimen_names_clean <- sub("_unwarped$", "", specimen_names)
+
+# sanity check
+stopifnot(all(specimen_names_clean %in% orig_names))
+
+# create cluster folders (Cluster_1, Cluster_2, ...)
+cluster_ids <- sort(unique(as.integer(clusters)))
+
+for (cl in cluster_ids) {
+  dir.create(
+    file.path(dest_base, paste0("Cluster_", cl)),
+    showWarnings = FALSE
+  )
+}
+
+# copy images into appropriate cluster folder
+for (i in seq_along(specimen_names_clean)) {
+
+  fname <- specimen_names_clean[i]
+  cl    <- clusters[i]
+
+  src_file <- orig_files[orig_names == fname]
+  dest_file <- file.path(
+    dest_base,
+    paste0("Cluster_", cl),
+    basename(src_file)
+  )
+
+  file.copy(
+    from = src_file,
+    to   = dest_file,
+    overwrite = FALSE
+  )
+}
+
+
+#ADD CLUSTER NAMING HERE, IF DESIRED
+
+#Save excel file
+write.csv(clusters,'project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/clusters_rgb_n3_thres_highercutoff.csv',row.names = TRUE)
+
+```
+
+
+## Centroid separation among phenotype clusters
+
+Assess which clusters are separated in multivariate phenotype space using Silhouette width. Silhouette width measures the relative similarity of each specimen to its assigned cluster compared to neighboring clusters, with values near 1 indicating strong separation, values near 0 indicating weak structure, and negative values indicating ambiguous assignment.
+```{r}
+library(cluster)
+library(dplyr)
+library(ggplot2)
+
+## =========================================================
+## Recompute distance matrix from SAME data used for clustering
+## =========================================================
+
+pc_scores <- pod_pca_rgb_thres$x[, seq_len(nPC)]
+
+# If you filtered rows earlier (e.g. ok <- complete.cases(...))
+if (exists("ok")) {
+  pc_scores <- pc_scores[ok, , drop = FALSE]
+  clusters  <- droplevels(clusters[ok])
+}
+
+dist_mat <- dist(pc_scores)
+
+
+## =========================================================
+## Compute silhouette
+## =========================================================
+
+sil <- silhouette(as.numeric(clusters), dist_mat)
+
+sil_df <- as.data.frame(sil)
+colnames(sil_df) <- c("cluster", "neighbor", "sil_width")
+
+# Make sure cluster factor matches clustering levels
+sil_df$cluster <- factor(sil_df$cluster, levels = levels(clusters))
+
+## =========================================================
+## Order within cluster
+## =========================================================
+
+sil_df <- sil_df %>%
+  group_by(cluster) %>%
+  arrange(sil_width, .by_group = TRUE) %>%
+  mutate(id = row_number()) %>%
+  ungroup()
+
+
+## =========================================================
+## Order clusters by mean silhouette (visual only)
+## =========================================================
+
+cluster_order <- sil_df %>%
+  group_by(cluster) %>%
+  summarize(mean_sil = mean(sil_width), .groups = "drop") %>%
+  arrange(desc(mean_sil)) %>%
+  pull(cluster)
+
+sil_df$cluster <- factor(sil_df$cluster, levels = cluster_order)
+
+overall_mean <- mean(sil_df$sil_width)
+
+overall_mean
+
+
+# Means by cluster
+
+cluster_means <- sil_df %>%
+  group_by(cluster) %>%
+  summarise(mean_sil = mean(sil_width),
+            n = n()) %>%
+  arrange(desc(mean_sil))
+
+cluster_means
+
+## =========================================================
+## Plot
+## =========================================================
+
+p <- ggplot(sil_df, aes(x = id, y = sil_width, fill = cluster)) +
+  geom_col(width = 1.2, position = "identity") +
+  facet_wrap(~ cluster, scales = "free_x", ncol = 6) +
+  geom_hline(
+    yintercept = overall_mean,
+    linetype = "dashed",
+    linewidth = 0.6,
+    color = "black"
+  ) +
+  scale_fill_manual(values = cluster_colors) +  # ← uses earlier mapping
+  scale_y_continuous(
+    limits = c(min(sil_df$sil_width) - 0.05, 1),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  labs(y = "Silhouette width", x = NULL) +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    strip.placement = "inside",
+    strip.background = element_rect(fill = "lightgrey", color = "black"),
+    strip.text = element_text(face = "bold", size = 14),
+    panel.spacing = unit(0.6, "lines")
+  )
+
+p
+
+
+## =========================================================
+## Save
+## =========================================================
+
+ggsave(
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/Figure_Silhouette_clean.png",
+  p,
+  width = 6,
+  height = 5,
+  dpi = 300
+)
+```
+
+
+## Sex differences among phenotype clusters
+
+
+Test for differences between males and females in multivariate phenotype space using PERMANOVA
+```{r}
+## =========================================================
+## PERMANOVA: Test sex differences in multivariate phenotype space
+## =========================================================
+
+library(vegan)
+
+#Load metadata
+meta <- read_xlsx("project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/metadata.xlsx")
+
+# Use retained PC scores only (same PCs used for clustering)
+pc_scores <- pod_pca_rgb_thres$x[, seq_len(nPC), drop = FALSE]
+
+# Build data frame linking PCA scores to metadata
+pca_df <- data.frame(
+  specimen_id = sub("_unwarped$", "", names(impose_list_rgb_thres)),
+  pc_scores,
+  stringsAsFactors = FALSE
+)
+
+# Merge with sex metadata
+pca_meta <- merge(
+  pca_df,
+  meta[, c("specimen_id", "sex")],
+  by = "specimen_id"
+)
+
+# Remove missing sex values
+pca_meta <- pca_meta[!is.na(pca_meta$sex), ]
+
+# Recompute distance matrix on retained PCs
+dist_mat <- dist(pca_meta[, grep("^PC", names(pca_meta))])
+
+## ---- PERMANOVA ----
+set.seed(123)
+
+perm_sex <- adonis2(
+  dist_mat ~ sex,
+  data = pca_meta,
+  permutations = 9999
+)
+
+perm_sex
+perm_sex$R2 # how much variance that sex explains, if PERMANOVA is significant
+
+# Significant PERMANOVA
+
+## ---- Test homogeneity of dispersion ----
+
+disp <- betadisper(dist_mat, pca_meta$sex)
+
+anova(disp)       # parametric test
+permutest(disp)   # permutation-based test
+
+# Non-significant, so variance differences are probably NOT driving results so we are good
+
+# FINAL RESULT: Sex differs in multivariate centroid location (real phenotype difference), but only explains 1.19% of total multivariate phenotype variance
+
+# "Multivariate color phenotype differed slightly between sexes (PERMANOVA, F = 3.92, P = 0.0001), but sex explained only 1.7% of total variation, indicating minimal sexual structuring of phenotype space."
+```
+
+
+#-------------- EXTRA FIGURES FOR POWERPOINT PRESENTATION -----------------
+
+## Visualize PCA on black background (no images)
+```{r}
+library(png)
+
+add_raster_preserve_aspect <- function(img, x, y, half_w_x, half_h_y) {
+  rasterImage(
+    img,
+    xleft   = x - half_w_x,
+    xright  = x + half_w_x,
+    ybottom = y - half_h_y,
+    ytop    = y + half_h_y
+  )
+}
+
+img_dir <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/micatoolbox_images_for_visualizing/nobackground/combined/"
+
+img_files <- list.files(img_dir, pattern="\\.png$", full.names=TRUE)
+img_list  <- lapply(img_files, readPNG)
+
+out_file <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/patternize_PCA_two_panel_black_noimg.png"
+
+png(out_file, width=4500, height=2000, res=300, bg="black")
+
+par(
+  mfrow=c(1,2),
+  mar=c(5,5,2,1),
+  cex.lab=1.8,
+  cex.axis=1.3,
+  bg="black",
+  col="#FAFAFA",
+  col.axis="#FAFAFA",
+  col.lab="#FAFAFA",
+  col.main="#FAFAFA"
+)
+
+##################################################
+# PANEL A — PC1 vs PC2 (NO specimen overlays)
+##################################################
+
+plot(
+  pod_pca_rgb_thres$x[,c(PCx,PCy)],
+  col=NA,
+  pch=NA,
+  xlim=limits[,1]+c(-5,5),
+  ylim=limits[,2]+c(-10,10),
+  xlab="PC1",
+  ylab="PC2"
+)
+
+points(
+  pod_pca_rgb_thres$x[,c(PCx,PCy)],
+  pch=16,
+  col=adjustcolor("grey80",0.6),
+  cex=1.4
+)
+
+
+##################################################
+# PANEL B — PC1 vs PC3
+##################################################
+
+plot(
+  pod_pca_rgb_thres$x[,c(PCx,3)],
+  pch=16,
+  col=adjustcolor("grey80",0.6),
+  cex=1.4,
+  xlab="PC1",
+  ylab="PC3"
+)
+
+
+dev.off()
+```
+
+## Visualize PCA with original images on black background
+```{r}
+library(png)
+
+add_raster_preserve_aspect <- function(img, x, y, half_w_x, half_h_y) {
+  rasterImage(
+    img,
+    xleft   = x - half_w_x,
+    xright  = x + half_w_x,
+    ybottom = y - half_h_y,
+    ytop    = y + half_h_y
+  )
+}
+
+img_dir <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/UNWARPING/micatoolbox_images_for_visualizing/nobackground/combined/"
+
+img_files <- list.files(img_dir, pattern="\\.png$", full.names=TRUE)
+img_list  <- lapply(img_files, readPNG)
+
+out_file <- "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/patternize_PCA_two_panel_black.png"
+
+png(out_file, width=4500, height=2000, res=300, bg="black")
+
+par(
+  mfrow=c(1,2),
+  mar=c(5,5,2,1),
+  cex.lab=1.8,
+  cex.axis=1.3,
+  bg="black",
+  col="#FAFAFA",        # default drawing color
+  col.axis="#FAFAFA",
+  col.lab="#FAFAFA",
+  col.main="#FAFAFA"
+)
+
+##################################################
+# PANEL A — PC1 vs PC2 with specimens
+##################################################
+
+plot(
+  pod_pca_rgb_thres$x[,c(PCx,PCy)],
+  col=NA,
+  pch=NA,
+  xlim=limits[,1]+c(-5,5),
+  ylim=limits[,2]+c(-10,10),
+  xlab="PC1",
+  ylab="PC2"
+)
+
+points(
+  pod_pca_rgb_thres$x[,c(PCx,PCy)],
+  pch=16,
+  col=adjustcolor("grey80",0.6),
+  cex=1.4
+)
+
+usr <- par("usr")
+pin <- par("pin")
+
+img_frac <- 0.035
+
+half_w_x <- (usr[2]-usr[1]) * img_frac / 2
+
+img_aspect <- dim(img_list[[1]])[1] / dim(img_list[[1]])[2]
+
+inch_per_x <- pin[1]/(usr[2]-usr[1])
+inch_per_y <- pin[2]/(usr[4]-usr[3])
+
+width_in  <- 2*half_w_x*inch_per_x
+height_in <- width_in*img_aspect
+
+half_h_y <- (height_in/2)/inch_per_y
+
+##################################################
+# ensure rare morphs always included
+##################################################
+
+rare_clusters <- c("18","16")
+
+rare_idx <- which(clusters %in% rare_clusters)
+
+remaining_idx <- setdiff(seq_along(img_list), rare_idx)
+
+set.seed(1)
+
+N_show <- 180
+
+sample_idx <- sample(
+  remaining_idx,
+  N_show - length(rare_idx)
+)
+
+show_idx <- c(rare_idx, sample_idx)
+
+show_idx <- show_idx[
+  order(pod_pca_rgb_thres$x[show_idx,PCx])
+]
+
+normal_idx <- show_idx[!show_idx %in% rare_idx]
+rare_draw  <- show_idx[ show_idx %in% rare_idx]
+
+##################################################
+# draw normal specimens first
+##################################################
+
+for(i in normal_idx){
+
+  add_raster_preserve_aspect(
+    img_list[[i]],
+    pod_pca_rgb_thres$x[i,PCx],
+    pod_pca_rgb_thres$x[i,PCy],
+    half_w_x,
+    half_h_y
+  )
+
+}
+
+##################################################
+# draw rare morphs last
+##################################################
+
+for(i in rare_draw){
+
+  add_raster_preserve_aspect(
+    img_list[[i]],
+    pod_pca_rgb_thres$x[i,PCx],
+    pod_pca_rgb_thres$x[i,PCy],
+    half_w_x,
+    half_h_y
+  )
+
+}
+
+
+##################################################
+# PANEL B — PC1 vs PC3
+##################################################
+
+plot(
+  pod_pca_rgb_thres$x[,c(PCx,3)],
+  pch=16,
+  col=adjustcolor("grey80",0.6),
+  cex=1.4,
+  xlab="PC1",
+  ylab="PC3"
+)
+
+points(
+  pod_pca_rgb_thres$x[clusters=="18",c(PCx,3)],
+  pch=16,
+  col="purple",
+  cex=1.4
+)
+
+points(
+  pod_pca_rgb_thres$x[clusters=="16",c(PCx,3)],
+  pch=16,
+  col="red",
+  cex=1.4
+)
+
+
+dev.off()
+```
+
+
+# Subset pods for GabRat analysis. This code will randomly select pods that span multivariate phenotypic space.
+```{r}
+###############################################################################
+# Select amphipod subset spanning phenotype space (full GabRat analysis)
+###############################################################################
+
+library(dplyr)
+
+###############################################################################
+# STEP 1 — Build dataframe linking specimens to PCA scores
+###############################################################################
+
+pod_df <- data.frame(
+  specimen = sub("_unwarped$", "", names(impose_list_rgb_thres)),
+  PC1 = pod_pca_rgb_thres$x[,1],
+  PC2 = pod_pca_rgb_thres$x[,2],
+  PC3 = pod_pca_rgb_thres$x[,3],
+  cluster = clusters,
+  stringsAsFactors = FALSE
+)
+
+###############################################################################
+# STEP 2 — Bin phenotype space along PC1
+###############################################################################
+
+pod_df <- pod_df %>%
+  mutate(pc1_bin = ntile(PC1, 10))
+
+###############################################################################
+# STEP 3 — Stratified sampling across phenotype gradient
+###############################################################################
+
+set.seed(42)
+
+pods_subset <- pod_df %>%
+  group_by(pc1_bin) %>%
+  slice_sample(n = 4) %>%   # 10 bins × 4 = ~40 pods
+  ungroup()
+
+###############################################################################
+# STEP 4 — Ensure rare morphs included
+###############################################################################
+
+rare_clusters <- c(18,16)  # purple + fluorescent red
+
+rare_pods <- pod_df %>%
+  filter(cluster %in% rare_clusters)
+
+pods_subset <- bind_rows(pods_subset, rare_pods) %>%
+  distinct(specimen, .keep_all = TRUE)
+
+###############################################################################
+# STEP 5 — Check subset size
+###############################################################################
+
+nrow(pods_subset)
+
+###############################################################################
+# STEP 6 — Visualize subset in PCA space
+###############################################################################
+
+plot(
+  pod_pca_rgb_thres$x[,1],
+  pod_pca_rgb_thres$x[,2],
+  col="grey80",
+  pch=16,
+  xlab="PC1",
+  ylab="PC2"
+)
+
+points(
+  pods_subset$PC1,
+  pods_subset$PC2,
+  col="red",
+  pch=16,
+  cex=1.4
+)
+
+
+###############################################################################
+# STEP 8 — Save subset
+###############################################################################
+
+write.csv(
+  pods_subset,
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/gabrat_subset_pods_from_patternize.csv",
+  row.names = FALSE
+)
+
+###############################################################################
+# STEP 9 — Extract specimen names for GabRat pipeline
+###############################################################################
+
+selected_pods <- pods_subset$specimen
+
+selected_pods
+```
+
+
+# Subset of subset for defense
+```{r}
+###############################################################################
+# Select representative subset of amphipods WITH substrate images
+###############################################################################
+
+library(dplyr)
+
+###############################################################################
+# STEP 1 — Build PCA dataframe
+###############################################################################
+
+pod_df <- data.frame(
+  specimen = sub("_unwarped$", "", names(impose_list_rgb_thres)),
+  PC1 = pod_pca_rgb_thres$x[,1],
+  PC2 = pod_pca_rgb_thres$x[,2],
+  PC3 = pod_pca_rgb_thres$x[,3],
+  cluster = clusters,
+  stringsAsFactors = FALSE
+)
+
+###############################################################################
+# STEP 2 — Extract specimen IDs
+###############################################################################
+
+# Extract the numeric specimen ID (e.g. 0638)
+pod_df$id <- sub(".*_(\\d+)$", "\\1", pod_df$specimen)
+
+###############################################################################
+# STEP 3 — Get substrate image IDs
+###############################################################################
+
+substrate_dir <- "E:/DISSERTATION_PHOTOS/Podoceridae/Podoceridae_popsurvey/Color/Photos_PodonSub/Substrate/RAW/COLOR_MEASUREMENTS/Images/"
+
+substrate_files <- list.files(substrate_dir, pattern="\\.NEF$", ignore.case = TRUE)
+
+substrate_ids <- sub(".*_(\\d+)\\.NEF$", "\\1", substrate_files)
+
+###############################################################################
+# STEP 4 — Filter PCA dataset to pods with substrate images
+###############################################################################
+
+pod_df_sub <- pod_df %>%
+  filter(id %in% substrate_ids)
+
+cat("Pods with substrate images:", nrow(pod_df_sub), "\n")
+
+###############################################################################
+# STEP 5 — Select representative pods using k-means
+###############################################################################
+
+set.seed(42)
+
+k <- 16   # defense subset size
+
+km <- kmeans(
+  pod_df_sub[,c("PC1","PC2","PC3")],
+  centers = k,
+  nstart = 50
+)
+
+pod_df_sub$km_cluster <- km$cluster
+
+###############################################################################
+# STEP 6 — Choose specimen closest to each cluster centroid
+###############################################################################
+
+selected <- pod_df_sub %>%
+  group_by(km_cluster) %>%
+  slice_min(
+    (PC1 - km$centers[km_cluster,1])^2 +
+    (PC2 - km$centers[km_cluster,2])^2 +
+    (PC3 - km$centers[km_cluster,3])^2,
+    n = 1
+  ) %>%
+  ungroup()
+
+###############################################################################
+# STEP 7 — Force rare morph inclusion
+###############################################################################
+
+rare_clusters <- c(18,16)
+
+rare_pods <- pod_df_sub %>%
+  filter(cluster %in% rare_clusters)
+
+selected <- bind_rows(selected, rare_pods) %>%
+  distinct(specimen, .keep_all = TRUE)
+
+###############################################################################
+# STEP 8 — Visualize selection
+###############################################################################
+
+plot(
+  pod_df_sub$PC1,
+  pod_df_sub$PC2,
+  col="grey80",
+  pch=16,
+  xlab="PC1",
+  ylab="PC2",
+  main="Defense subset selection"
+)
+
+points(
+  selected$PC1,
+  selected$PC2,
+  col="red",
+  pch=16,
+  cex=1.6
+)
+
+###############################################################################
+# STEP 9 — Save subset
+###############################################################################
+
+write.csv(
+  selected,
+    "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/gabrat_subset_pods_from_patternize_DEFENSE.csv",
+  row.names = FALSE
+)
+
+selected_pods <- selected$specimen
+selected_pods
+```
+
+# Subset pods for GabRat analysis. This code will randomly select pods that span multivariate phenotypic space, using completed photos from the chunk above and then random selection for the remaining.
+```{r}
+###############################################################################
+# Subset pods for GabRat analysis
+# (fixed specimens + stratified sampling + guaranteed final N)
+###############################################################################
+
+library(dplyr)
+
+###############################################################################
+# STEP 1 — Build dataframe linking specimens to PCA scores
+###############################################################################
+
+pod_df <- data.frame(
+  specimen = sub("_unwarped$", "", names(impose_list_rgb_thres)),
+  PC1 = pod_pca_rgb_thres$x[,1],
+  PC2 = pod_pca_rgb_thres$x[,2],
+  PC3 = pod_pca_rgb_thres$x[,3],
+  cluster = clusters,
+  stringsAsFactors = FALSE
+)
+
+###############################################################################
+# STEP 1.5 — Restrict to pods with substrate photos
+###############################################################################
+
+allowed_pods <- c(
+"BCPD_0638","BCPD_0396","BCPD_0403","BCPD_0404","BCPD_0405","BCPD_0406","BCPD_0407",
+"BCPD_0411","BCPD_0412","BCPD_0413","BCPD_0415","BCPD_0416","BCPD_0417","BCPD_0418",
+"BCPD_0422","BCPD_0423","BCPD_0425","BCPD_0427","BCPD_0428","BCPD_0429","BCPD_0431",
+"BCPD_0433","BCPD_0434","BCPD_0435","BCPD_0436","BCPD_0438","BCPD_0440","BCPD_0442",
+"BCPD_0443","BCPD_0445","BCPD_0447","BCPD_0448","BCPD_0451","BCPD_0452","BCPD_0453",
+"BCPD_0454","BCPD_0455","BCPD_0456","BCPD_0457","BCPD_0458","BCPD_0459","BCPD_0460",
+"BCPD_0461","BCPD_0464","BCPD_0469","BCPD_0472","BCPD_0473","BCPD_0474","BCPD_0476",
+"BCPD_0477","BCPD_0487","BCPD_0488","BCPD_0489","BCPD_0490","BCPD_0491","BCPD_0493",
+"BCPD_0494","BCPD_0496","BCPD_0498","BCPD_0499","BCPD_0501","BCPD_0502","BCPD_0503",
+"BCPD_0504","BCPD_0505","BCPD_0507","BCPD_0508","BCPD_0509","BCPD_0510","BCPD_0511",
+"BCPD_0512","BCPD_0599","BCPD_0612","BCPD_0613","BCPD_0614","BCPD_0615","BCPD_0616",
+"BCPD_0617","BCPD_0618","BCPD_0619","BCPD_0620","BCPD_0621","BCPD_0622","BCPD_0631",
+"BCPD_0635","BCPD_0636","BCPD_0637"
+)
+
+pod_df <- pod_df %>%
+  filter(specimen %in% allowed_pods)
+
+###############################################################################
+# STEP 2 — Bin phenotype space along PC1
+###############################################################################
+
+pod_df <- pod_df %>%
+  mutate(pc1_bin = ntile(PC1, 10))
+
+###############################################################################
+# STEP 3 — Define fixed specimens (ALWAYS included)
+###############################################################################
+
+fixed_pods <- c(
+"BCPD_0620","BCPD_0405","BCPD_0417","BCPD_0425","BCPD_0428","BCPD_0434",
+"BCPD_0436","BCPD_0445","BCPD_0447","BCPD_0458","BCPD_0469","BCPD_0487",
+"BCPD_0490","BCPD_0502","BCPD_0512","BCPD_0599"
+)
+
+fixed_df <- pod_df %>%
+  filter(specimen %in% fixed_pods)
+
+###############################################################################
+# STEP 4 — Remove fixed specimens from sampling pool
+###############################################################################
+
+remaining_df <- pod_df %>%
+  filter(!specimen %in% fixed_pods)
+
+###############################################################################
+# STEP 5 — Stratified sampling (balanced but flexible)
+###############################################################################
+
+set.seed(42)
+
+target_n <- 32
+n_needed <- target_n - nrow(fixed_df)
+
+random_subset <- remaining_df %>%
+  group_by(pc1_bin) %>%
+  group_modify(~ {
+    n_take <- min(nrow(.x), ceiling(n_needed / 10))
+    slice_sample(.x, n = n_take)
+  }) %>%
+  ungroup()
+
+# trim if too many
+if(nrow(random_subset) > n_needed){
+  random_subset <- random_subset %>%
+    slice_sample(n = n_needed)
+}
+
+###############################################################################
+# STEP 6 — Combine fixed + random
+###############################################################################
+
+pods_subset <- bind_rows(fixed_df, random_subset)
+
+###############################################################################
+# STEP 7 — Ensure rare morphs included
+###############################################################################
+
+rare_clusters <- c(18, 16)
+
+rare_pods <- pod_df %>%
+  filter(cluster %in% rare_clusters)
+
+pods_subset <- bind_rows(pods_subset, rare_pods) %>%
+  distinct(specimen, .keep_all = TRUE)
+
+###############################################################################
+# STEP 7.5 — Top up to exact target sample size
+###############################################################################
+
+current_n <- nrow(pods_subset)
+
+if(current_n < target_n){
+
+  needed <- target_n - current_n
+
+  extras <- pod_df %>%
+    filter(!specimen %in% pods_subset$specimen) %>%
+    slice_sample(n = needed)
+
+  pods_subset <- bind_rows(pods_subset, extras)
+}
+
+###############################################################################
+# STEP 8 — Final check
+###############################################################################
+
+stopifnot(nrow(pods_subset) == target_n)
+
+###############################################################################
+# STEP 9 — Visualize subset
+###############################################################################
+
+plot(
+  pod_pca_rgb_thres$x[,1],
+  pod_pca_rgb_thres$x[,2],
+  col = "grey80",
+  pch = 16,
+  xlab = "PC1",
+  ylab = "PC2"
+)
+
+points(
+  pods_subset$PC1,
+  pods_subset$PC2,
+  col = "red",
+  pch = 16,
+  cex = 1.4
+)
+
+###############################################################################
+# STEP 10 — Save subset
+###############################################################################
+
+write.csv(
+  pods_subset,
+  "project_directory/Podocerus/data/photos/PATTERNIZE/ALL/all_color/results/gabrat_subset_pods_from_patternize_final.csv",
+  row.names = FALSE
+)
+
+###############################################################################
+# STEP 11 — Extract specimen names
+###############################################################################
+
+selected_pods <- pods_subset$specimen
+
+selected_pods
+```
