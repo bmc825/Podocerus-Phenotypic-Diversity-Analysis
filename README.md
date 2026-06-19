@@ -102,17 +102,20 @@ Primary analyses were conducted using:
 
 * R
 * R Markdown
-* tidyverse
+* ImageJ
+* micaToolbox
+* Patternize
+* Recolorize
 * brms
+* tidyverse
 * colordistance
 * vegan
 * cluster
 * ape
-* pegas
 * ggtree
-* ImageJ
 * Geneious
 * IQ-TREE
+
 
 ---
 
