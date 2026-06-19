@@ -196,11 +196,10 @@ Goddard JHR. 2016. Latitudinal variation in mimicry between aeolid nudibranchs a
 The analyses implemented in this repository rely on the following software and analytical frameworks:
 
 * Bürkner PC. 2017. *brms: An R Package for Bayesian Multilevel Models Using Stan*. Journal of Statistical Software 80:1–28.
-* Bürkner PC. 2018. *Advanced Bayesian Multilevel Modeling with the R Package brms*. The R Journal 10:395–411.
 * Paradis E, Schliep K. 2019. *ape 5.0: an environment for modern phylogenetics and evolutionary analyses in R*. Bioinformatics 35:526–528.
-* Paradis E. 2010. *pegas: an R package for population genetics with an integrated-modular approach*. Bioinformatics 26:419–420.
 * Nguyen LT, Schmidt HA, von Haeseler A, Minh BQ. 2015. *IQ-TREE: A Fast and Effective Stochastic Algorithm for Estimating Maximum-Likelihood Phylogenies*. Molecular Biology and Evolution 32:268–274.
 * Yu G, Smith DK, Zhu H, Guan Y, Lam TTY. 2017. *ggtree: an R package for visualization and annotation of phylogenetic trees*. Methods in Ecology and Evolution 8:28–36.
+* Van Belleghem, S.M., Papa, R., Ortiz-Zuazaga, H., Hendrickx, F., Jiggins, C.D., Owen McMillan, W., Counterman, B.A., 2018. *patternize: An R package for quantifying colour pattern variation.* Methods in Ecology and Evolution 9, 390–398.
 * Weller HI, Westneat MW. 2019. *Quantitative color profiling of digital images with earth mover's distance using the R package colordistance*. PeerJ 7:e6398.
 * Oksanen J et al. *vegan: Community Ecology Package*.
 * Maechler M et al. *cluster: Cluster Analysis Basics and Extensions*.
