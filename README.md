@@ -129,11 +129,11 @@ analysis/
 
 ## Example Outputs
 ![PCA](figures/phenotype_pca.png)
-![PCA](figures/phenotype_pca.png)
-![PCA](figures/phenotype_pca.png)
-![PCA](figures/phenotype_pca.png)
-![PCA](figures/phenotype_pca.png)
-![PCA](figures/phenotype_pca.png)
+![PCA](figures/03_plot.png)
+![PCA](figures/04_plot.png)
+![PCA](figures/05_plot.png)
+![PCA](figures/06_plot.png)
+![PCA](figures/07_plot.png)
 
 ---
 
